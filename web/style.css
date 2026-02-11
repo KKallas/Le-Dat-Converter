@@ -1,0 +1,244 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 16px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 1.3rem;
+  margin-bottom: 16px;
+  color: #fff;
+}
+
+section {
+  margin-bottom: 20px;
+}
+
+label {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+/* -- video area -- */
+
+.video-wrap {
+  position: relative;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  line-height: 0;
+  cursor: crosshair;
+}
+
+.video-wrap video {
+  width: 100%;
+  display: block;
+}
+
+.video-wrap canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* -- inputs -- */
+
+input[type="number"] {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #16213e;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+}
+
+input[type="file"] {
+  font-size: 0.85rem;
+}
+
+/* -- buttons -- */
+
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: #0f3460;
+  color: #e0e0e0;
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: #1a5276;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #e94560;
+  color: #fff;
+  padding: 10px 20px;
+  font-size: 0.9rem;
+}
+
+.btn-primary:hover {
+  background: #c0392b;
+}
+
+.btn-small {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}
+
+.btn-danger {
+  background: #5c1a1a;
+  font-size: 0.75rem;
+  padding: 3px 8px;
+}
+
+.btn-danger:hover {
+  background: #8b2020;
+}
+
+/* -- ports list -- */
+
+.port {
+  background: #16213e;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #2a2a4a;
+}
+
+.port-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.port-header .port-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-width: 50px;
+}
+
+.port-header .color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.points-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.point-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  background: #1a1a2e;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.point-row:hover {
+  background: #1e2a4a;
+}
+
+.point-row.active {
+  border-color: #e94560;
+  background: #2a1a2e;
+}
+
+.point-row .point-label {
+  min-width: 20px;
+  color: #888;
+}
+
+.point-row .coords {
+  color: #ccc;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
+.point-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  margin-left: 12px;
+}
+
+/* -- progress -- */
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: #16213e;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+  display: none;
+}
+
+.progress-bar .fill {
+  height: 100%;
+  width: 0%;
+  background: #e94560;
+  transition: width 0.1s;
+}
+
+#status {
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 6px;
+  min-height: 1.2em;
+}
+
+/* -- preview -- */
+
+#preview-section {
+  display: none;
+}
+
+#preview-canvas {
+  width: 100%;
+  border-radius: 6px;
+  image-rendering: pixelated;
+  background: #000;
+}
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}

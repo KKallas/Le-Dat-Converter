@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Le-Dat Converter</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Le-Dat Converter</h1>
+
+  <!-- Video upload -->
+  <section>
+    <input type="file" id="video-input" accept="video/*">
+  </section>
+
+  <!-- Video + overlay (click to place active point) -->
+  <section class="video-wrap" id="video-wrap">
+    <video id="video" muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </section>
+
+  <!-- Ports -->
+  <section>
+    <div id="ports-list"></div>
+    <button id="add-port-btn" class="btn-small">+ Add Port</button>
+  </section>
+
+  <!-- Process -->
+  <section>
+    <button id="process-btn" class="btn-primary">Process Video</button>
+    <div class="progress-bar" id="progress-bar">
+      <div class="fill" id="progress-fill"></div>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <!-- Preview + download -->
+  <section id="preview-section">
+    <canvas id="preview-canvas"></canvas>
+    <div class="btn-group">
+      <button id="download-dat" disabled>Download .dat</button>
+      <button id="download-txt" disabled>Download .txt</button>
+    </div>
+  </section>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

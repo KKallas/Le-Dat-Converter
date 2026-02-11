@@ -6,7 +6,10 @@ Python and JavaScript library for generating `.dat` files compatible with [LEDBu
 
 The H803TC is an offline/online master LED controller that reads `.dat` files from an SD card to drive pixel LED installations. LEDBuild is the Windows-only software normally used to create these files.
 
-This library lets you **generate `.dat` files programmatically** — no Windows or LEDBuild required. Available in both Python (for scripting/CLI) and JavaScript (for browser apps).
+This project provides:
+
+1. **A browser-based video-to-DAT converter** — upload a video, pick a sample line, download a `.dat` file. No install needed, works on phone.
+2. **Python and JavaScript libraries** for generating `.dat` files programmatically.
 
 ### Supported hardware
 
@@ -17,7 +20,52 @@ This library lets you **generate `.dat` files programmatically** — no Windows 
 | H801RA | Slave controller | 3,412 (4 ports) |
 | H802RA | Slave controller | 4,096 (4 ports) |
 
-## Python
+---
+
+## Web App — Video to DAT
+
+The quickest way to create a `.dat` file. Runs entirely in the browser with zero dependencies.
+
+### How to run
+
+```bash
+python start_server.py
+```
+
+This starts a local web server and opens the app in your browser at `http://localhost:8080/web/index.html`. You can also pass a custom port: `python start_server.py 3000`.
+
+### How to use
+
+1. **Load a video** — Click "Choose File" and select a video from your device.
+
+2. **Position the sample line** — The video appears with default A/B points. Adjust the **Point A** (x, y) and **Point B** (x, y) inputs to place a line across the area of the video you want to map to your LED strip. A coloured overlay shows the line on the video.
+
+3. **Set LED count** — Enter the number of LEDs in your strip in the **LEDs** field (default: 400). This controls how many pixels are sampled along the line.
+
+4. **Process** — Click **Process Video**. The frame rate is auto-detected from the video. Every frame is extracted and sampled along the A→B line. A preview image builds up below (one row per frame, one column per LED). Playback speed is controlled on the H803TC itself.
+
+5. **Download** — Once processing is complete:
+   - Click **Download .dat** to get the binary file for your H803TC SD card.
+   - Click **Download .txt** to get a human-readable summary of universes and frame count.
+
+6. **Copy to SD card** — Put the `.dat` file on a FAT32-formatted SD card and insert it into your H803TC controller.
+
+### Hosting on ESP32
+
+The web app is pure static files with zero external dependencies. To serve it from an ESP32:
+
+1. Copy these files to the ESP32 filesystem (SPIFFS/LittleFS):
+   - `web/index.html`
+   - `web/app.js`
+   - `web/style.css`
+   - `js/datfile.js`
+2. Serve them with any ESP32 HTTP server library, keeping the same directory structure.
+
+Total size is ~5KB.
+
+---
+
+## Python Library
 
 ### Installation
 
@@ -59,7 +107,9 @@ dat.write("output.dat")  # also writes output.txt
 
 Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.universe_leds(i)`
 
-## JavaScript (Browser)
+---
+
+## JavaScript Library (Browser)
 
 ### Quick start
 
@@ -69,15 +119,10 @@ Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.univ
 
   const dat = new DATFile();
   dat.addUniverse(400);
-  dat.addUniverse(200);
   dat.setNumFrames(60);
 
-  dat.setPixel(0, 0, 0, 255, 0, 0);  // universe 0, frame 0, pixel 0 = red
-
-  const [r, g, b] = dat.getPixel(0, 0, 0);  // [255, 0, 0]
-
-  dat.download("output.dat");     // triggers .dat download
-  dat.downloadTxt("output.txt");  // triggers .txt download
+  dat.setPixel(0, 0, 0, 255, 0, 0);
+  dat.download("output.dat");
 </script>
 ```
 
@@ -100,6 +145,8 @@ Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.univ
 
 Properties: `dat.numUniverses`, `dat.numFrames`, `dat.totalPixels`, `dat.universeLeds(i)`
 
+---
+
 ## DAT file format
 
 | Section | Size | Description |
@@ -113,24 +160,22 @@ Each frame is individually padded to the next 512-byte boundary.
 
 ```
 Le-Dat-Converter/
+  web/
+    index.html          # browser app — video to DAT converter
+    app.js              # app logic
+    style.css           # styling
+  js/
+    datfile.js          # JavaScript DATFile class (ES module)
   ledat/
     __init__.py
     datfile.py          # Python DATFile class
-  js/
-    datfile.js          # JavaScript DATFile class (ES module)
   examples/
     demo.py             # Python usage example
+  milestones/
+    v0.1.md             # roadmap
+  start_server.py       # local dev server
   pyproject.toml
   README.md
-```
-
-## Examples
-
-Python demo:
-
-```bash
-pip install -e .
-python examples/demo.py
 ```
 
 ## License
