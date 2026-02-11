@@ -213,13 +213,13 @@ class DATFile:
         with open(filename, "wb") as f:
             f.write(self._build_header(template_header))
 
+            frame_bytes = self.total_pixels * 3
+            frame_pad = (512 - frame_bytes % 512) % 512
+
             for idx in range(self._num_frames):
                 f.write(self._build_frame(idx))
-
-            current = self.HEADER_SIZE + self._num_frames * self.total_pixels * 3
-            rem = current % 512
-            if rem:
-                f.write(bytes(512 - rem))
+                if frame_pad:
+                    f.write(bytes(frame_pad))
 
             dat_size = f.tell()
 
