@@ -26,7 +26,7 @@ const PORT_COLORS = [
   "#ff66cc", "#88ff00", "#aa66ff", "#ff4400",
 ];
 
-const DRAG_INTERVAL = 40; // ~25fps throttle for drag updates
+const DRAG_INTERVAL = 20; // ~50fps throttle for drag updates
 
 // ------------------------------------------------------------------ //
 // State
@@ -34,7 +34,8 @@ const DRAG_INTERVAL = 40; // ~25fps throttle for drag updates
 
 /**
  * @typedef {{ x: number, y: number }} Point
- * @typedef {{ leds: number, points: Point[], collapsed: boolean, previewCollapsed: boolean }} Port
+ * @typedef {{ pivot: Point, offset: Point, angle: number, scaleX: number, scaleY: number, baseRadius: number }} TransformState
+ * @typedef {{ leds: number, trimStart: number, trimEnd: number, points: Point[], collapsed: boolean, previewCollapsed: boolean, editMode: string, savedPoints: Point[]|null, transformState: TransformState|null }} Port
  * @typedef {{ ports: Port[], collapsed: boolean }} Controller
  */
 
@@ -381,7 +382,7 @@ function addPort(ci, leds = 400, points = null) {
       { x: cx + 100, y: cy },
     ];
   }
-  const port = { leds, points, collapsed: false, previewCollapsed: true };
+  const port = { leds, points, collapsed: false, previewCollapsed: true, editMode: "points", savedPoints: null, transformState: null, trimStart: 0, trimEnd: 0 };
   controllers[ci].ports.push(port);
   rebuildPortsList();
   portDirty.add(port);
@@ -430,6 +431,110 @@ function removePointFromPort(portIdx, pointIdx) {
              activeSelection.point > pointIdx) {
     activeSelection.point--;
   }
+}
+
+// ------------------------------------------------------------------ //
+// Transform mode
+// ------------------------------------------------------------------ //
+
+function enterTransformMode(port) {
+  port.savedPoints = port.points.map((p) => ({ x: p.x, y: p.y }));
+
+  // Compute centroid
+  let cx = 0, cy = 0;
+  for (const p of port.points) { cx += p.x; cy += p.y; }
+  cx /= port.points.length;
+  cy /= port.points.length;
+
+  // Compute baseRadius from max distance of points to centroid (min 50)
+  // Clamp so scale handles (at half radius) stay within the frame
+  let maxDist = 0;
+  for (const p of port.points) {
+    const d = Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
+    if (d > maxDist) maxDist = d;
+  }
+  const maxAllowed = Math.min(cx, cy, mediaW - cx, mediaH - cy) * 2; // *2 because handles use half
+  const baseRadius = Math.max(50, Math.min(maxDist, maxAllowed));
+
+  port.transformState = {
+    pivot: { x: Math.round(cx), y: Math.round(cy) },
+    offset: { x: 0, y: 0 },
+    angle: 0,
+    scaleX: 1,
+    scaleY: 1,
+    baseRadius,
+  };
+  port.editMode = "transform";
+}
+
+function applyTransform(port) {
+  if (!port.transformState || !port.savedPoints) return;
+  port.points = computeTransformedPoints(port.savedPoints, port.transformState);
+  port.editMode = "points";
+  port.savedPoints = null;
+  port.transformState = null;
+  markPortDirty(port);
+}
+
+function cancelTransform(port) {
+  if (port.savedPoints) {
+    port.points = port.savedPoints;
+  }
+  port.editMode = "points";
+  port.savedPoints = null;
+  port.transformState = null;
+}
+
+/** Apply Scale → Rotate → Translate around pivot */
+function computeTransformedPoints(savedPoints, state) {
+  const { pivot, offset, angle, scaleX, scaleY } = state;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  return savedPoints.map((p) => {
+    // Relative to pivot
+    const rx = (p.x - pivot.x) * scaleX;
+    const ry = (p.y - pivot.y) * scaleY;
+    // Rotate
+    const rotX = rx * cos - ry * sin;
+    const rotY = rx * sin + ry * cos;
+    // Translate back + offset
+    return {
+      x: Math.round(rotX + pivot.x + offset.x),
+      y: Math.round(rotY + pivot.y + offset.y),
+    };
+  });
+}
+
+/** Get all draggable control points (always returns every handle) */
+function getTransformControlPoints(port) {
+  const s = port.transformState;
+  if (!s) return [];
+  const sr = s.baseRadius / 2; // scale handles use half radius
+
+  return [
+    { key: "pivot",  x: s.pivot.x, y: s.pivot.y },
+    { key: "offset", x: s.pivot.x + s.offset.x, y: s.pivot.y + s.offset.y },
+    { key: "rotate", x: s.pivot.x + s.baseRadius * Math.cos(s.angle), y: s.pivot.y + s.baseRadius * Math.sin(s.angle) },
+    { key: "scaleX", x: s.pivot.x + sr * s.scaleX, y: s.pivot.y },
+    { key: "scaleY", x: s.pivot.x, y: s.pivot.y + sr * s.scaleY },
+  ];
+}
+
+/** Parse tab-separated normalized coordinates back to pixel points */
+function parseSaveLoadText(text, w, h) {
+  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+  const points = [];
+  for (const line of lines) {
+    const parts = line.split(/\t|,|\s+/).map(Number);
+    if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      points.push({
+        x: Math.round(parts[0] * w),
+        y: Math.round(parts[1] * h),
+      });
+    }
+  }
+  return points;
 }
 
 // ------------------------------------------------------------------ //
@@ -939,70 +1044,264 @@ function renderPorts() {
         div.appendChild(prevSection);
       }
 
-      // Points list (collapsible)
+      // Trim + edit mode section (collapsible)
       if (!isCollapsed) {
-        const pointsDiv = document.createElement("div");
-        pointsDiv.className = "points-list";
+        // Trim start/end
+        const trimRow = document.createElement("div");
+        trimRow.className = "point-actions";
+        trimRow.style.display = "flex";
+        trimRow.style.gap = "8px";
+        trimRow.style.alignItems = "center";
 
-        port.points.forEach((pt, pti) => {
-          const row = document.createElement("div");
-          row.className = "point-row";
-          if (activeSelection &&
-              activeSelection.port === globalIdx &&
-              activeSelection.point === pti) {
-            row.classList.add("active");
-          }
-
-          const ptLabel = document.createElement("span");
-          ptLabel.className = "point-label";
-          ptLabel.textContent = String.fromCharCode(65 + pti);
-
-          const coords = document.createElement("span");
-          coords.className = "coords";
-          coords.textContent = `(${pt.x}, ${pt.y})`;
-
-          row.append(ptLabel, coords);
-
-          if (port.points.length > 2) {
-            const rmPt = document.createElement("button");
-            rmPt.className = "btn-danger";
-            rmPt.textContent = "\u00d7";
-            rmPt.style.marginLeft = "auto";
-            rmPt.addEventListener("click", (e) => {
-              e.stopPropagation();
-              removePointFromPort(globalIdx, pti);
-              markPortDirty(port);
-              renderPorts();
-              drawOverlay();
-            });
-            row.appendChild(rmPt);
-          }
-
-          row.addEventListener("click", () => {
-            activeSelection = { port: globalIdx, point: pti };
-            renderPorts();
-            drawOverlay();
-          });
-
-          pointsDiv.appendChild(row);
+        const tsLabel = document.createElement("label");
+        tsLabel.textContent = "Trim start";
+        const tsInput = document.createElement("input");
+        tsInput.type = "number";
+        tsInput.min = "0";
+        tsInput.max = String(port.leds - port.trimEnd - 2);
+        tsInput.value = String(port.trimStart);
+        tsInput.addEventListener("change", () => {
+          port.trimStart = Math.max(0, Math.min(port.leds - port.trimEnd - 2, parseInt(tsInput.value) || 0));
+          tsInput.value = port.trimStart;
+          updateLinePreviews();
+          markPortDirty(port);
+          renderPorts();
         });
 
-        div.appendChild(pointsDiv);
-
-        // Add point button
-        const actions = document.createElement("div");
-        actions.className = "point-actions";
-        const addPtBtn = document.createElement("button");
-        addPtBtn.className = "btn-small";
-        addPtBtn.textContent = "+ Point";
-        addPtBtn.addEventListener("click", () => {
-          addPointToPort(globalIdx);
+        const teLabel = document.createElement("label");
+        teLabel.textContent = "end";
+        const teInput = document.createElement("input");
+        teInput.type = "number";
+        teInput.min = "0";
+        teInput.max = String(port.leds - port.trimStart - 2);
+        teInput.value = String(port.trimEnd);
+        teInput.addEventListener("change", () => {
+          port.trimEnd = Math.max(0, Math.min(port.leds - port.trimStart - 2, parseInt(teInput.value) || 0));
+          teInput.value = port.trimEnd;
+          updateLinePreviews();
           markPortDirty(port);
+          renderPorts();
+        });
+
+        trimRow.append(tsLabel, tsInput, teLabel, teInput);
+        div.appendChild(trimRow);
+
+        // Dropdown: Points / Transform
+        const modeRow = document.createElement("div");
+        modeRow.className = "point-actions";
+        const modeSelect = document.createElement("select");
+        modeSelect.className = "edit-mode-select";
+        for (const [val, lbl] of [["points", "Points"], ["transform", "Transform"], ["saveload", "Save/Load"]]) {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = lbl;
+          if (port.editMode === val) opt.selected = true;
+          modeSelect.appendChild(opt);
+        }
+        modeSelect.addEventListener("change", () => {
+          const prev = port.editMode;
+          const next = modeSelect.value;
+          // Leaving transform without applying = cancel
+          if (prev === "transform" && next !== "transform") {
+            cancelTransform(port);
+            activeSelection = null;
+          }
+          if (next === "transform" && prev !== "transform") {
+            enterTransformMode(port);
+            activeSelection = { port: globalIdx, control: "pivot" };
+          }
+          if (next === "saveload") {
+            port.editMode = "saveload";
+          } else if (next === "points") {
+            port.editMode = "points";
+          }
           renderPorts();
           drawOverlay();
         });
-        actions.appendChild(addPtBtn);
-        div.appendChild(actions);
+        modeRow.appendChild(modeSelect);
+        div.appendChild(modeRow);
+
+        if (port.editMode === "points") {
+          // Points list
+          const pointsDiv = document.createElement("div");
+          pointsDiv.className = "points-list";
+
+          port.points.forEach((pt, pti) => {
+            const row = document.createElement("div");
+            row.className = "point-row";
+            if (activeSelection &&
+                activeSelection.port === globalIdx &&
+                activeSelection.point === pti) {
+              row.classList.add("active");
+            }
+
+            const ptLabel = document.createElement("span");
+            ptLabel.className = "point-label";
+            ptLabel.textContent = String.fromCharCode(65 + pti);
+
+            const coords = document.createElement("span");
+            coords.className = "coords";
+            coords.textContent = `(${pt.x}, ${pt.y})`;
+
+            row.append(ptLabel, coords);
+
+            if (port.points.length > 2) {
+              const rmPt = document.createElement("button");
+              rmPt.className = "btn-danger";
+              rmPt.textContent = "\u00d7";
+              rmPt.style.marginLeft = "auto";
+              rmPt.addEventListener("click", (e) => {
+                e.stopPropagation();
+                removePointFromPort(globalIdx, pti);
+                markPortDirty(port);
+                renderPorts();
+                drawOverlay();
+              });
+              row.appendChild(rmPt);
+            }
+
+            row.addEventListener("click", () => {
+              activeSelection = { port: globalIdx, point: pti };
+              renderPorts();
+              drawOverlay();
+            });
+
+            pointsDiv.appendChild(row);
+          });
+
+          div.appendChild(pointsDiv);
+
+          // Add point button
+          const actions = document.createElement("div");
+          actions.className = "point-actions";
+          const addPtBtn = document.createElement("button");
+          addPtBtn.className = "btn-small";
+          addPtBtn.textContent = "+ Point";
+          addPtBtn.addEventListener("click", () => {
+            addPointToPort(globalIdx);
+            markPortDirty(port);
+            renderPorts();
+            drawOverlay();
+          });
+          actions.appendChild(addPtBtn);
+          div.appendChild(actions);
+        } else if (port.editMode === "transform") {
+          // Transform mode UI — list controls like point rows
+          const s = port.transformState;
+          const controlsList = document.createElement("div");
+          controlsList.className = "points-list";
+
+          const controlDefs = [
+            { key: "pivot",  label: "Pivot",  value: s ? `(${Math.round(s.pivot.x)}, ${Math.round(s.pivot.y)})` : "" },
+            { key: "offset", label: "Offset", value: s ? `(${Math.round(s.offset.x)}, ${Math.round(s.offset.y)})` : "" },
+            { key: "rotate", label: "Rotate", value: s ? `${(s.angle * 180 / Math.PI).toFixed(1)}\u00b0` : "" },
+            { key: "scaleX", label: "ScaleX", value: s ? s.scaleX.toFixed(2) : "" },
+            { key: "scaleY", label: "ScaleY", value: s ? s.scaleY.toFixed(2) : "" },
+          ];
+
+          for (const cd of controlDefs) {
+            const row = document.createElement("div");
+            row.className = "point-row";
+            if (activeSelection &&
+                activeSelection.port === globalIdx &&
+                "control" in activeSelection &&
+                activeSelection.control === cd.key) {
+              row.classList.add("active");
+            }
+
+            const lbl = document.createElement("span");
+            lbl.className = "point-label";
+            lbl.textContent = cd.label;
+
+            const val = document.createElement("span");
+            val.className = "coords";
+            val.textContent = cd.value;
+
+            row.append(lbl, val);
+            row.addEventListener("click", () => {
+              activeSelection = { port: globalIdx, control: cd.key };
+              renderPorts();
+              drawOverlay();
+            });
+            controlsList.appendChild(row);
+          }
+
+          div.appendChild(controlsList);
+
+          // Apply / Cancel
+          const actionsRow = document.createElement("div");
+          actionsRow.className = "transform-actions";
+          const applyBtn = document.createElement("button");
+          applyBtn.className = "btn-small btn-primary";
+          applyBtn.textContent = "Apply";
+          applyBtn.addEventListener("click", () => {
+            applyTransform(port);
+            activeSelection = null;
+            renderPorts();
+            drawOverlay();
+            updateLinePreviews();
+          });
+          const cancelBtn = document.createElement("button");
+          cancelBtn.className = "btn-small";
+          cancelBtn.textContent = "Cancel";
+          cancelBtn.addEventListener("click", () => {
+            cancelTransform(port);
+            activeSelection = null;
+            renderPorts();
+            drawOverlay();
+            updateLinePreviews();
+          });
+          actionsRow.append(applyBtn, cancelBtn);
+          div.appendChild(actionsRow);
+        } else if (port.editMode === "saveload") {
+          // Save/Load mode — textarea with normalized coordinates
+          const w = mediaW || 1;
+          const h = mediaH || 1;
+          const text = port.points
+            .map((p) => `${(p.x / w).toFixed(6)}\t${(p.y / h).toFixed(6)}`)
+            .join("\n");
+
+          const ta = document.createElement("textarea");
+          ta.className = "saveload-textarea";
+          ta.value = text;
+          ta.spellcheck = false;
+          div.appendChild(ta);
+
+          const slActions = document.createElement("div");
+          slActions.className = "transform-actions";
+
+          const copyBtn = document.createElement("button");
+          copyBtn.className = "btn-small";
+          copyBtn.textContent = "Copy";
+          copyBtn.addEventListener("click", () => {
+            navigator.clipboard.writeText(ta.value).then(() => {
+              copyBtn.textContent = "Copied!";
+              setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+            });
+          });
+
+          const loadBtn = document.createElement("button");
+          loadBtn.className = "btn-small btn-primary";
+          loadBtn.textContent = "Load";
+          loadBtn.addEventListener("click", () => {
+            const parsed = parseSaveLoadText(ta.value, w, h);
+            if (parsed && parsed.length >= 2) {
+              port.points = parsed;
+              markPortDirty(port);
+              port.editMode = "points";
+              activeSelection = { port: globalIdx, point: 0 };
+              renderPorts();
+              drawOverlay();
+              updateLinePreviews();
+            } else {
+              loadBtn.textContent = "Need 2+ points";
+              setTimeout(() => { loadBtn.textContent = "Load"; }, 2000);
+            }
+          });
+
+          slActions.append(copyBtn, loadBtn);
+          div.appendChild(slActions);
+        }
       }
 
       group.appendChild(div);
@@ -1059,7 +1358,7 @@ function updateLinePreviews() {
     }
 
     const ctx = canvas.getContext("2d");
-    const samples = samplePolyline(sampleCtx, port.points, port.leds);
+    const samples = samplePortLine(sampleCtx, port);
     const imgData = ctx.createImageData(port.leds, 1);
     for (let p = 0; p < port.leds; p++) {
       imgData.data[p * 4] = samples[p * 3];
@@ -1135,7 +1434,7 @@ async function processPortPreview(port) {
         captureCtx.drawImage(frames[rangeStart + f], 0, 0);
       }
 
-      const samples = samplePolyline(captureCtx, port.points, port.leds);
+      const samples = samplePortLine(captureCtx, port);
       const imgData = prevCtx.createImageData(port.leds, 1);
       for (let p = 0; p < port.leds; p++) {
         imgData.data[p * 4] = samples[p * 3];
@@ -1204,7 +1503,7 @@ async function processMultiPortPreviews(portsToRender) {
       }
 
       for (const { port, prevCtx } of portData) {
-        const samples = samplePolyline(captureCtx, port.points, port.leds);
+        const samples = samplePortLine(captureCtx, port);
         const imgData = prevCtx.createImageData(port.leds, 1);
         for (let p = 0; p < port.leds; p++) {
           imgData.data[p * 4] = samples[p * 3];
@@ -1253,9 +1552,37 @@ function getMediaCoords(e) {
 
 function moveActivePoint(x, y) {
   if (!activeSelection) return;
-  const pt = ports[activeSelection.port].points[activeSelection.point];
-  pt.x = Math.max(0, Math.min(mediaW - 1, x));
-  pt.y = Math.max(0, Math.min(mediaH - 1, y));
+  const port = ports[activeSelection.port];
+
+  if ("control" in activeSelection && port.transformState) {
+    // Transform mode: move control point
+    const s = port.transformState;
+    const key = activeSelection.control;
+
+    if (key === "pivot") {
+      s.pivot.x = x;
+      s.pivot.y = y;
+    } else if (key === "offset") {
+      s.offset.x = x - s.pivot.x;
+      s.offset.y = y - s.pivot.y;
+    } else if (key === "rotate") {
+      s.angle = Math.atan2(y - s.pivot.y, x - s.pivot.x);
+    } else if (key === "scaleX") {
+      const dist = x - s.pivot.x;
+      s.scaleX = dist / (s.baseRadius / 2);
+    } else if (key === "scaleY") {
+      const dist = y - s.pivot.y;
+      s.scaleY = dist / (s.baseRadius / 2);
+    }
+
+    // Update the live polyline for the port
+    port.points = computeTransformedPoints(port.savedPoints, s);
+  } else if ("point" in activeSelection) {
+    // Points mode
+    const pt = port.points[activeSelection.point];
+    pt.x = Math.max(0, Math.min(mediaW - 1, x));
+    pt.y = Math.max(0, Math.min(mediaH - 1, y));
+  }
 }
 
 function onDragStart(e) {
@@ -1289,18 +1616,44 @@ function onDragEnd() {
   if (!dragging) return;
   dragging = false;
   if (activeSelection) {
-    markPortDirty(ports[activeSelection.port]);
+    const port = ports[activeSelection.port];
+    // Only mark dirty in points mode (transform applies on "Apply")
+    if ("point" in activeSelection) {
+      markPortDirty(port);
+    }
   }
   renderPorts(); // full re-render to sync everything
 }
 
-/** Fast update of only the active point's coordinate text */
+/** Fast update of only the active point's coordinate text or transform readout */
 function updateActiveCoords() {
   if (!activeSelection) return;
-  const pt = ports[activeSelection.port].points[activeSelection.point];
-  const activeRow = portsList.querySelector(".point-row.active .coords");
-  if (activeRow) {
-    activeRow.textContent = `(${pt.x}, ${pt.y})`;
+  const port = ports[activeSelection.port];
+
+  if ("control" in activeSelection && port.transformState) {
+    // Update all transform control values in their rows
+    const s = port.transformState;
+    const rows = portsList.querySelectorAll(".point-row");
+    const vals = {
+      "Pivot":  `(${Math.round(s.pivot.x)}, ${Math.round(s.pivot.y)})`,
+      "Offset": `(${Math.round(s.offset.x)}, ${Math.round(s.offset.y)})`,
+      "Rotate": `${(s.angle * 180 / Math.PI).toFixed(1)}\u00b0`,
+      "ScaleX": s.scaleX.toFixed(2),
+      "ScaleY": s.scaleY.toFixed(2),
+    };
+    rows.forEach((row) => {
+      const lbl = row.querySelector(".point-label");
+      const coords = row.querySelector(".coords");
+      if (lbl && coords && vals[lbl.textContent]) {
+        coords.textContent = vals[lbl.textContent];
+      }
+    });
+  } else if ("point" in activeSelection) {
+    const pt = port.points[activeSelection.point];
+    const activeRow = portsList.querySelector(".point-row.active .coords");
+    if (activeRow) {
+      activeRow.textContent = `(${pt.x}, ${pt.y})`;
+    }
   }
 }
 
@@ -1333,43 +1686,142 @@ function drawOverlay() {
 
   ports.forEach((port, pi) => {
     const color = PORT_COLORS[pi % PORT_COLORS.length];
-    const pts = port.points;
 
-    overlayCtx.strokeStyle = color;
-    overlayCtx.lineWidth = 2;
-    overlayCtx.beginPath();
-    overlayCtx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) {
-      overlayCtx.lineTo(pts[i].x, pts[i].y);
-    }
-    overlayCtx.stroke();
-
-    pts.forEach((pt, pti) => {
-      const isActive = activeSelection &&
-        activeSelection.port === pi &&
-        activeSelection.point === pti;
-
-      overlayCtx.fillStyle = isActive ? "#fff" : color;
+    if (port.editMode === "transform" && port.savedPoints && port.transformState) {
+      // Draw saved (original) polyline in faded color
+      overlayCtx.globalAlpha = 0.3;
+      overlayCtx.strokeStyle = color;
+      overlayCtx.lineWidth = 2;
       overlayCtx.beginPath();
-      overlayCtx.arc(pt.x, pt.y, isActive ? 7 : 5, 0, Math.PI * 2);
-      overlayCtx.fill();
-
-      if (isActive) {
-        overlayCtx.strokeStyle = "#fff";
-        overlayCtx.lineWidth = 2;
-        overlayCtx.beginPath();
-        overlayCtx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
-        overlayCtx.stroke();
+      overlayCtx.moveTo(port.savedPoints[0].x, port.savedPoints[0].y);
+      for (let i = 1; i < port.savedPoints.length; i++) {
+        overlayCtx.lineTo(port.savedPoints[i].x, port.savedPoints[i].y);
       }
+      overlayCtx.stroke();
+      overlayCtx.globalAlpha = 1;
 
-      overlayCtx.fillStyle = "#fff";
-      overlayCtx.font = "12px sans-serif";
-      overlayCtx.fillText(
-        String.fromCharCode(65 + pti),
-        pt.x + 10,
-        pt.y - 10
-      );
-    });
+      // Draw transformed polyline in full color
+      const transformed = computeTransformedPoints(port.savedPoints, port.transformState);
+      overlayCtx.strokeStyle = color;
+      overlayCtx.lineWidth = 2;
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(transformed[0].x, transformed[0].y);
+      for (let i = 1; i < transformed.length; i++) {
+        overlayCtx.lineTo(transformed[i].x, transformed[i].y);
+      }
+      overlayCtx.stroke();
+
+      // Point labels on transformed polyline
+      transformed.forEach((pt, pti) => {
+        overlayCtx.fillStyle = color;
+        overlayCtx.beginPath();
+        overlayCtx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+        overlayCtx.fill();
+        overlayCtx.fillStyle = "#fff";
+        overlayCtx.font = "12px sans-serif";
+        overlayCtx.fillText(String.fromCharCode(65 + pti), pt.x + 10, pt.y - 10);
+      });
+
+      // Draw transform control points
+      const controls = getTransformControlPoints(port);
+      for (const cp of controls) {
+        const isActive = activeSelection &&
+          activeSelection.port === pi &&
+          "control" in activeSelection &&
+          activeSelection.control === cp.key;
+
+        if (cp.key === "pivot") {
+          // Draw pivot as crosshair
+          const sz = 8;
+          overlayCtx.strokeStyle = isActive ? "#fff" : "#ffaa00";
+          overlayCtx.lineWidth = 2;
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(cp.x - sz, cp.y); overlayCtx.lineTo(cp.x + sz, cp.y);
+          overlayCtx.moveTo(cp.x, cp.y - sz); overlayCtx.lineTo(cp.x, cp.y + sz);
+          overlayCtx.stroke();
+          // Diamond shape
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(cp.x, cp.y - sz);
+          overlayCtx.lineTo(cp.x + sz, cp.y);
+          overlayCtx.lineTo(cp.x, cp.y + sz);
+          overlayCtx.lineTo(cp.x - sz, cp.y);
+          overlayCtx.closePath();
+          overlayCtx.stroke();
+        } else {
+          // Other handles: larger circles
+          overlayCtx.fillStyle = isActive ? "#fff" : "#00aaff";
+          overlayCtx.beginPath();
+          overlayCtx.arc(cp.x, cp.y, isActive ? 8 : 6, 0, Math.PI * 2);
+          overlayCtx.fill();
+          if (isActive) {
+            overlayCtx.strokeStyle = "#fff";
+            overlayCtx.lineWidth = 2;
+            overlayCtx.beginPath();
+            overlayCtx.arc(cp.x, cp.y, 11, 0, Math.PI * 2);
+            overlayCtx.stroke();
+          }
+          // Label
+          overlayCtx.fillStyle = "#fff";
+          overlayCtx.font = "11px sans-serif";
+          overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
+        }
+
+        // Draw line from pivot to handle for rotate/scale
+        if (cp.key !== "pivot") {
+          const pivot = controls.find((c) => c.key === "pivot");
+          if (pivot) {
+            overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
+            overlayCtx.lineWidth = 1;
+            overlayCtx.setLineDash([4, 4]);
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(pivot.x, pivot.y);
+            overlayCtx.lineTo(cp.x, cp.y);
+            overlayCtx.stroke();
+            overlayCtx.setLineDash([]);
+          }
+        }
+      }
+    } else {
+      // Points mode: current behavior
+      const pts = port.points;
+
+      overlayCtx.strokeStyle = color;
+      overlayCtx.lineWidth = 2;
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        overlayCtx.lineTo(pts[i].x, pts[i].y);
+      }
+      overlayCtx.stroke();
+
+      pts.forEach((pt, pti) => {
+        const isActive = activeSelection &&
+          activeSelection.port === pi &&
+          "point" in activeSelection &&
+          activeSelection.point === pti;
+
+        overlayCtx.fillStyle = isActive ? "#fff" : color;
+        overlayCtx.beginPath();
+        overlayCtx.arc(pt.x, pt.y, isActive ? 7 : 5, 0, Math.PI * 2);
+        overlayCtx.fill();
+
+        if (isActive) {
+          overlayCtx.strokeStyle = "#fff";
+          overlayCtx.lineWidth = 2;
+          overlayCtx.beginPath();
+          overlayCtx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
+          overlayCtx.stroke();
+        }
+
+        overlayCtx.fillStyle = "#fff";
+        overlayCtx.font = "12px sans-serif";
+        overlayCtx.fillText(
+          String.fromCharCode(65 + pti),
+          pt.x + 10,
+          pt.y - 10
+        );
+      });
+    }
   });
 }
 
@@ -1463,6 +1915,16 @@ function samplePolyline(ctx, points, numSamples) {
     out[i * 3 + 2] = pixel[2];
   }
 
+  return out;
+}
+
+/** Sample a port's polyline, applying trimStart/trimEnd (trimmed LEDs are black). */
+function samplePortLine(ctx, port) {
+  const active = port.leds - port.trimStart - port.trimEnd;
+  if (active <= 0) return new Uint8Array(port.leds * 3);
+  const sampled = samplePolyline(ctx, port.points, active);
+  const out = new Uint8Array(port.leds * 3); // all black
+  out.set(sampled, port.trimStart * 3);
   return out;
 }
 
