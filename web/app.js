@@ -33,13 +33,15 @@ const PORT_COLORS = [
   "#ff66cc", "#88ff00", "#aa66ff", "#ff4400",
 ];
 
+const DRAG_INTERVAL = 40; // ~25fps throttle for drag updates
+
 // ------------------------------------------------------------------ //
 // State
 // ------------------------------------------------------------------ //
 
 /**
  * @typedef {{ x: number, y: number }} Point
- * @typedef {{ leds: number, points: Point[] }} Port
+ * @typedef {{ leds: number, points: Point[], collapsed: boolean }} Port
  */
 
 /** @type {Port[]} */
@@ -56,12 +58,19 @@ let loadedImage = null;
 /** @type {DATFile|null} */
 let currentDat = null;
 
-/** Width/height of the loaded media in pixels. */
 let mediaW = 0;
 let mediaH = 0;
 
+/** Offscreen canvas for live line sampling */
+let sampleCanvas = null;
+let sampleCtx = null;
+
+// Drag state
+let dragging = false;
+let lastDragUpdate = 0;
+
 // ------------------------------------------------------------------ //
-// Media loading (video or image)
+// Media loading
 // ------------------------------------------------------------------ //
 
 mediaInput.addEventListener("change", (e) => {
@@ -69,9 +78,7 @@ mediaInput.addEventListener("change", (e) => {
   if (!file) return;
 
   const url = URL.createObjectURL(file);
-  const isImage = file.type.startsWith("image/");
-
-  if (isImage) {
+  if (file.type.startsWith("image/")) {
     loadImage(url);
   } else {
     loadVideo(url);
@@ -86,6 +93,12 @@ function initAfterLoad(w, h) {
   overlay.width = w;
   overlay.height = h;
 
+  // Prepare offscreen canvas for live sampling
+  sampleCanvas = document.createElement("canvas");
+  sampleCanvas.width = w;
+  sampleCanvas.height = h;
+  sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+
   if (ports.length === 0) {
     const pad = Math.round(w * 0.1);
     const cy = Math.round(h / 2);
@@ -97,6 +110,7 @@ function initAfterLoad(w, h) {
 
   renderPorts();
   drawOverlay();
+  updateLinePreviews();
 }
 
 function loadImage(url) {
@@ -110,7 +124,6 @@ function loadImage(url) {
     overlay.classList.add("static");
 
     initAfterLoad(img.naturalWidth, img.naturalHeight);
-
     setStatus(`Image loaded: ${img.naturalWidth}x${img.naturalHeight} (1 frame)`);
   };
   img.src = url;
@@ -141,7 +154,6 @@ function loadVideo(url) {
   );
 }
 
-
 // ------------------------------------------------------------------ //
 // Port / point data model
 // ------------------------------------------------------------------ //
@@ -155,8 +167,7 @@ function addPort(leds = 400, points = null) {
       { x: cx + 100, y: cy },
     ];
   }
-  ports.push({ leds, points });
-  // Auto-select first point of new port
+  ports.push({ leds, points, collapsed: false });
   activeSelection = { port: ports.length - 1, point: 0 };
 }
 
@@ -172,13 +183,12 @@ function removePort(portIdx) {
 function addPointToPort(portIdx) {
   const pts = ports[portIdx].points;
   const last = pts[pts.length - 1];
-  // Offset new point slightly from the last one
   pts.push({ x: last.x + 30, y: last.y });
   activeSelection = { port: portIdx, point: pts.length - 1 };
 }
 
 function removePointFromPort(portIdx, pointIdx) {
-  if (ports[portIdx].points.length <= 2) return; // minimum 2
+  if (ports[portIdx].points.length <= 2) return;
   ports[portIdx].points.splice(pointIdx, 1);
   if (activeSelection &&
       activeSelection.port === portIdx &&
@@ -195,18 +205,31 @@ function removePointFromPort(portIdx, pointIdx) {
 // Ports UI rendering
 // ------------------------------------------------------------------ //
 
+/** Per-port line preview canvases, keyed by port index */
+const linePreviewCanvases = new Map();
+
 function renderPorts() {
   portsList.innerHTML = "";
+  linePreviewCanvases.clear();
 
   ports.forEach((port, pi) => {
     const color = PORT_COLORS[pi % PORT_COLORS.length];
+    const isCollapsed = port.collapsed;
 
     const div = document.createElement("div");
     div.className = "port";
 
-    // Header
+    // Header row
     const header = document.createElement("div");
     header.className = "port-header";
+
+    const toggle = document.createElement("button");
+    toggle.className = "btn-toggle";
+    toggle.textContent = isCollapsed ? "\u25b6" : "\u25bc";
+    toggle.addEventListener("click", () => {
+      port.collapsed = !port.collapsed;
+      renderPorts();
+    });
 
     const dot = document.createElement("span");
     dot.className = "color-dot";
@@ -227,6 +250,7 @@ function renderPorts() {
     ledsInput.addEventListener("change", () => {
       port.leds = Math.max(1, Math.min(400, parseInt(ledsInput.value) || 1));
       ledsInput.value = port.leds;
+      updateLinePreviews();
     });
 
     const removeBtn = document.createElement("button");
@@ -238,75 +262,85 @@ function renderPorts() {
       drawOverlay();
     });
 
-    header.append(dot, label, ledsLabel, ledsInput, removeBtn);
+    header.append(toggle, dot, label, ledsLabel, ledsInput, removeBtn);
     div.appendChild(header);
 
-    // Points list
-    const pointsDiv = document.createElement("div");
-    pointsDiv.className = "points-list";
+    // Line preview strip (always visible)
+    const lineCanvas = document.createElement("canvas");
+    lineCanvas.className = "line-preview";
+    lineCanvas.height = 1;
+    lineCanvas.width = port.leds;
+    div.appendChild(lineCanvas);
+    linePreviewCanvases.set(pi, lineCanvas);
 
-    port.points.forEach((pt, pti) => {
-      const row = document.createElement("div");
-      row.className = "point-row";
-      if (activeSelection &&
-          activeSelection.port === pi &&
-          activeSelection.point === pti) {
-        row.classList.add("active");
-      }
+    // Points list (collapsible)
+    if (!isCollapsed) {
+      const pointsDiv = document.createElement("div");
+      pointsDiv.className = "points-list";
 
-      const ptLabel = document.createElement("span");
-      ptLabel.className = "point-label";
-      ptLabel.textContent = String.fromCharCode(65 + pti); // A, B, C...
+      port.points.forEach((pt, pti) => {
+        const row = document.createElement("div");
+        row.className = "point-row";
+        if (activeSelection &&
+            activeSelection.port === pi &&
+            activeSelection.point === pti) {
+          row.classList.add("active");
+        }
 
-      const coords = document.createElement("span");
-      coords.className = "coords";
-      coords.textContent = `(${pt.x}, ${pt.y})`;
+        const ptLabel = document.createElement("span");
+        ptLabel.className = "point-label";
+        ptLabel.textContent = String.fromCharCode(65 + pti);
 
-      row.append(ptLabel, coords);
+        const coords = document.createElement("span");
+        coords.className = "coords";
+        coords.textContent = `(${pt.x}, ${pt.y})`;
 
-      // Remove point button (only if > 2 points)
-      if (port.points.length > 2) {
-        const rmPt = document.createElement("button");
-        rmPt.className = "btn-danger";
-        rmPt.textContent = "\u00d7";
-        rmPt.style.marginLeft = "auto";
-        rmPt.addEventListener("click", (e) => {
-          e.stopPropagation();
-          removePointFromPort(pi, pti);
+        row.append(ptLabel, coords);
+
+        if (port.points.length > 2) {
+          const rmPt = document.createElement("button");
+          rmPt.className = "btn-danger";
+          rmPt.textContent = "\u00d7";
+          rmPt.style.marginLeft = "auto";
+          rmPt.addEventListener("click", (e) => {
+            e.stopPropagation();
+            removePointFromPort(pi, pti);
+            renderPorts();
+            drawOverlay();
+          });
+          row.appendChild(rmPt);
+        }
+
+        row.addEventListener("click", () => {
+          activeSelection = { port: pi, point: pti };
           renderPorts();
           drawOverlay();
         });
-        row.appendChild(rmPt);
-      }
 
-      // Click to select this point
-      row.addEventListener("click", () => {
-        activeSelection = { port: pi, point: pti };
+        pointsDiv.appendChild(row);
+      });
+
+      div.appendChild(pointsDiv);
+
+      // Add point button
+      const actions = document.createElement("div");
+      actions.className = "point-actions";
+      const addPtBtn = document.createElement("button");
+      addPtBtn.className = "btn-small";
+      addPtBtn.textContent = "+ Point";
+      addPtBtn.addEventListener("click", () => {
+        addPointToPort(pi);
         renderPorts();
         drawOverlay();
       });
-
-      pointsDiv.appendChild(row);
-    });
-
-    div.appendChild(pointsDiv);
-
-    // Add point button
-    const actions = document.createElement("div");
-    actions.className = "point-actions";
-    const addPtBtn = document.createElement("button");
-    addPtBtn.className = "btn-small";
-    addPtBtn.textContent = "+ Point";
-    addPtBtn.addEventListener("click", () => {
-      addPointToPort(pi);
-      renderPorts();
-      drawOverlay();
-    });
-    actions.appendChild(addPtBtn);
-    div.appendChild(actions);
+      actions.appendChild(addPtBtn);
+      div.appendChild(actions);
+    }
 
     portsList.appendChild(div);
   });
+
+  updateLinePreviews();
 }
 
 addPortBtn.addEventListener("click", () => {
@@ -316,26 +350,117 @@ addPortBtn.addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------------ //
-// Video click → place active point
+// Live line preview sampling
 // ------------------------------------------------------------------ //
 
-videoWrap.addEventListener("click", (e) => {
-  if (!mediaReady || !activeSelection) return;
+function updateLinePreviews() {
+  if (!mediaReady || !sampleCtx) return;
 
+  // Draw current frame onto sample canvas
+  if (mediaType === "image" && loadedImage) {
+    sampleCtx.drawImage(loadedImage, 0, 0);
+  } else if (mediaType === "video") {
+    sampleCtx.drawImage(video, 0, 0);
+  }
+
+  ports.forEach((port, pi) => {
+    const canvas = linePreviewCanvases.get(pi);
+    if (!canvas) return;
+
+    // Resize if LED count changed
+    if (canvas.width !== port.leds) {
+      canvas.width = port.leds;
+    }
+
+    const ctx = canvas.getContext("2d");
+    const samples = samplePolyline(sampleCtx, port.points, port.leds);
+    const imgData = ctx.createImageData(port.leds, 1);
+    for (let p = 0; p < port.leds; p++) {
+      imgData.data[p * 4] = samples[p * 3];
+      imgData.data[p * 4 + 1] = samples[p * 3 + 1];
+      imgData.data[p * 4 + 2] = samples[p * 3 + 2];
+      imgData.data[p * 4 + 3] = 255;
+    }
+    ctx.putImageData(imgData, 0, 0);
+  });
+}
+
+// ------------------------------------------------------------------ //
+// Drag to move active point
+// ------------------------------------------------------------------ //
+
+function getMediaCoords(e) {
   const rect = videoWrap.getBoundingClientRect();
-  const scaleX = mediaW / rect.width;
-  const scaleY = mediaH / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: Math.round((clientX - rect.left) * (mediaW / rect.width)),
+    y: Math.round((clientY - rect.top) * (mediaH / rect.height)),
+  };
+}
 
-  const x = Math.round((e.clientX - rect.left) * scaleX);
-  const y = Math.round((e.clientY - rect.top) * scaleY);
-
+function moveActivePoint(x, y) {
+  if (!activeSelection) return;
   const pt = ports[activeSelection.port].points[activeSelection.point];
   pt.x = Math.max(0, Math.min(mediaW - 1, x));
   pt.y = Math.max(0, Math.min(mediaH - 1, y));
+}
 
+function onDragStart(e) {
+  if (!mediaReady || !activeSelection) return;
+  dragging = true;
+  const { x, y } = getMediaCoords(e);
+  moveActivePoint(x, y);
   renderPorts();
   drawOverlay();
-});
+  updateLinePreviews();
+  lastDragUpdate = performance.now();
+}
+
+function onDragMove(e) {
+  if (!dragging) return;
+  e.preventDefault();
+
+  const now = performance.now();
+  if (now - lastDragUpdate < DRAG_INTERVAL) return;
+  lastDragUpdate = now;
+
+  const { x, y } = getMediaCoords(e);
+  moveActivePoint(x, y);
+  drawOverlay();
+  updateLinePreviews();
+  // Update just the active point's coords display without full re-render
+  updateActiveCoords();
+}
+
+function onDragEnd() {
+  if (!dragging) return;
+  dragging = false;
+  renderPorts(); // full re-render to sync everything
+}
+
+/** Fast update of only the active point's coordinate text */
+function updateActiveCoords() {
+  if (!activeSelection) return;
+  const pt = ports[activeSelection.port].points[activeSelection.point];
+  const activeRow = portsList.querySelector(".point-row.active .coords");
+  if (activeRow) {
+    activeRow.textContent = `(${pt.x}, ${pt.y})`;
+  }
+}
+
+// Mouse events
+videoWrap.addEventListener("mousedown", onDragStart);
+window.addEventListener("mousemove", onDragMove);
+window.addEventListener("mouseup", onDragEnd);
+
+// Touch events
+videoWrap.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  onDragStart(e);
+}, { passive: false });
+window.addEventListener("touchmove", (e) => { onDragMove(e); }, { passive: false });
+window.addEventListener("touchend", onDragEnd);
 
 // ------------------------------------------------------------------ //
 // Overlay drawing
@@ -345,7 +470,6 @@ function drawOverlay() {
   if (!mediaReady) return;
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
-  // For images, draw the image as the background
   if (mediaType === "image" && loadedImage) {
     overlayCtx.drawImage(loadedImage, 0, 0);
   }
@@ -354,7 +478,6 @@ function drawOverlay() {
     const color = PORT_COLORS[pi % PORT_COLORS.length];
     const pts = port.points;
 
-    // Draw polyline
     overlayCtx.strokeStyle = color;
     overlayCtx.lineWidth = 2;
     overlayCtx.beginPath();
@@ -364,7 +487,6 @@ function drawOverlay() {
     }
     overlayCtx.stroke();
 
-    // Draw points
     pts.forEach((pt, pti) => {
       const isActive = activeSelection &&
         activeSelection.port === pi &&
@@ -383,7 +505,6 @@ function drawOverlay() {
         overlayCtx.stroke();
       }
 
-      // Label
       overlayCtx.fillStyle = "#fff";
       overlayCtx.font = "12px sans-serif";
       overlayCtx.fillText(
@@ -443,32 +564,22 @@ function seekTo(time) {
   });
 }
 
-/**
- * Sample pixels along a polyline defined by points.
- * LEDs are distributed evenly along the total path length.
- *
- * @param {CanvasRenderingContext2D} ctx
- * @param {Point[]} points
- * @param {number} numSamples
- * @returns {Uint8Array} flat RGB array
- */
 function samplePolyline(ctx, points, numSamples) {
   const out = new Uint8Array(numSamples * 3);
 
-  // Calculate cumulative segment lengths
   const segLengths = [];
   let totalLength = 0;
   for (let i = 1; i < points.length; i++) {
     const dx = points[i].x - points[i - 1].x;
     const dy = points[i].y - points[i - 1].y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    segLengths.push(len);
-    totalLength += len;
+    segLengths.push(Math.sqrt(dx * dx + dy * dy));
+    totalLength += segLengths[segLengths.length - 1];
   }
 
   if (totalLength === 0) {
-    // All points same position — sample the single point
-    const pixel = ctx.getImageData(points[0].x, points[0].y, 1, 1).data;
+    const px = Math.max(0, Math.min(points[0].x, mediaW - 1));
+    const py = Math.max(0, Math.min(points[0].y, mediaH - 1));
+    const pixel = ctx.getImageData(px, py, 1, 1).data;
     for (let i = 0; i < numSamples; i++) {
       out[i * 3] = pixel[0];
       out[i * 3 + 1] = pixel[1];
@@ -480,7 +591,6 @@ function samplePolyline(ctx, points, numSamples) {
   for (let i = 0; i < numSamples; i++) {
     const dist = numSamples === 1 ? 0 : (i / (numSamples - 1)) * totalLength;
 
-    // Find which segment this distance falls on
     let remaining = dist;
     let seg = 0;
     while (seg < segLengths.length - 1 && remaining > segLengths[seg]) {
@@ -493,8 +603,8 @@ function samplePolyline(ctx, points, numSamples) {
     const x = Math.round(points[seg].x + t * (points[seg + 1].x - points[seg].x));
     const y = Math.round(points[seg].y + t * (points[seg + 1].y - points[seg].y));
 
-    const px = Math.max(0, Math.min(x, overlay.width - 1));
-    const py = Math.max(0, Math.min(y, overlay.height - 1));
+    const px = Math.max(0, Math.min(x, mediaW - 1));
+    const py = Math.max(0, Math.min(y, mediaH - 1));
 
     const pixel = ctx.getImageData(px, py, 1, 1).data;
     out[i * 3] = pixel[0];
@@ -536,20 +646,17 @@ processBtn.addEventListener("click", async () => {
     : `Processing ${totalFrames} frames across ${ports.length} port(s)...`
   );
 
-  // Offscreen canvas for pixel sampling
   const captureCanvas = document.createElement("canvas");
   captureCanvas.width = mediaW;
   captureCanvas.height = mediaH;
-  const captureCtx = captureCanvas.getContext("2d");
+  const captureCtx = captureCanvas.getContext("2d", { willReadFrequently: true });
 
-  // Build DAT file — one universe per port
   const dat = new DATFile();
   for (const port of ports) {
     dat.addUniverse(port.leds);
   }
   dat.setNumFrames(totalFrames);
 
-  // Per-port preview canvases
   const previewCtxs = ports.map((port) => {
     const c = document.createElement("canvas");
     c.width = port.leds;
@@ -572,7 +679,6 @@ processBtn.addEventListener("click", async () => {
       const imgData = previewCtxs[pi].createImageData(port.leds, 1);
       for (let p = 0; p < port.leds; p++) {
         dat.setPixel(pi, f, p, samples[p * 3], samples[p * 3 + 1], samples[p * 3 + 2]);
-
         imgData.data[p * 4] = samples[p * 3];
         imgData.data[p * 4 + 1] = samples[p * 3 + 1];
         imgData.data[p * 4 + 2] = samples[p * 3 + 2];
@@ -581,7 +687,6 @@ processBtn.addEventListener("click", async () => {
       previewCtxs[pi].putImageData(imgData, 0, f);
     }
 
-    // Progress
     const pct = ((f + 1) / totalFrames) * 100;
     progressFill.style.width = pct + "%";
     if (f % 10 === 0) {
@@ -595,7 +700,6 @@ processBtn.addEventListener("click", async () => {
   const totalLeds = ports.reduce((s, p) => s + p.leds, 0);
   setStatus(`Done. ${totalFrames} frame(s), ${ports.length} port(s), ${totalLeds} total LEDs.`);
 
-  // Build preview section with labels + canvases
   previewContainer.innerHTML = "";
   for (let pi = 0; pi < ports.length; pi++) {
     const color = PORT_COLORS[pi % PORT_COLORS.length];
