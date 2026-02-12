@@ -9,14 +9,51 @@ body {
   background: #1a1a2e;
   color: #e0e0e0;
   padding: 16px;
-  max-width: 800px;
-  margin: 0 auto;
 }
 
 h1 {
   font-size: 1.3rem;
   margin-bottom: 16px;
   color: #fff;
+}
+
+/* -- responsive layout -- */
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 70px);
+  gap: 16px;
+}
+
+.panel-preview {
+  order: 0;
+  flex: 1 1 50%;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.panel-ports {
+  order: 1;
+  flex: 1 1 50%;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+@media (min-width: 900px) {
+  .layout {
+    flex-direction: row;
+  }
+
+  .panel-ports {
+    order: 0;
+    flex: 0 0 380px;
+  }
+
+  .panel-preview {
+    order: 1;
+    flex: 1 1 0;
+  }
 }
 
 section {
@@ -123,6 +160,27 @@ button:disabled {
   background: #8b2020;
 }
 
+/* -- controllers -- */
+
+.controller-group {
+  margin-bottom: 14px;
+}
+
+.controller-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.controller-actions {
+  margin-top: 4px;
+  margin-left: 10px;
+  margin-bottom: 2px;
+}
+
 /* -- ports list -- */
 
 .port {
@@ -225,6 +283,162 @@ button:disabled {
   margin-left: 12px;
 }
 
+/* -- per-port preview -- */
+
+.port-preview-section {
+  margin-top: 6px;
+}
+
+.port-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.port-preview-status {
+  font-size: 0.75rem;
+  color: #e94560;
+  font-style: italic;
+}
+
+.preview-axes-wrapper {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  grid-template-rows: 16px 1fr;
+  margin-top: 4px;
+}
+
+.preview-x-axis {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  font-size: 0.65rem;
+  color: #888;
+}
+
+.preview-x-axis span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.preview-y-axis {
+  grid-column: 1;
+  grid-row: 2;
+  position: relative;
+  font-size: 0.65rem;
+  color: #888;
+  text-align: right;
+  padding-right: 4px;
+}
+
+.preview-y-axis span {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.preview-axes-wrapper .preview-canvas {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.checkbox-label {
+  font-size: 0.85rem;
+  color: #aaa;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+/* -- in/out point thumbnails -- */
+
+.io-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.io-thumbs {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.io-thumb-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.io-thumb {
+  border-radius: 4px;
+  border: 1px solid #2a2a4a;
+  background: #000;
+}
+
+.io-thumb-label {
+  font-size: 0.65rem;
+  color: #888;
+  font-family: monospace;
+}
+
+/* -- playback controls -- */
+
+.playback-wrap {
+  background: #1a1a2e;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.frame-label {
+  font-size: 0.75rem;
+  color: #888;
+  font-family: monospace;
+  margin-left: auto;
+}
+
+.seek-bar {
+  width: 100%;
+  height: 6px;
+  margin: 6px 0 0 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #16213e;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.seek-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e94560;
+  cursor: pointer;
+}
+
+.seek-bar::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e94560;
+  border: none;
+  cursor: pointer;
+}
+
 /* -- progress -- */
 
 .progress-bar {
@@ -253,10 +467,6 @@ button:disabled {
 
 /* -- preview -- */
 
-#preview-section {
-  display: none;
-}
-
 .preview-label {
   font-size: 0.85rem;
   color: #ccc;
@@ -277,9 +487,15 @@ button:disabled {
   background: #000;
 }
 
-.btn-group {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  flex-wrap: wrap;
+/* -- scrollbar styling for panels -- */
+
+.panel-ports::-webkit-scrollbar,
+.panel-preview::-webkit-scrollbar {
+  width: 6px;
+}
+
+.panel-ports::-webkit-scrollbar-thumb,
+.panel-preview::-webkit-scrollbar-thumb {
+  background: #2a2a4a;
+  border-radius: 3px;
 }
