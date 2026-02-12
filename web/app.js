@@ -4,7 +4,7 @@ import { DATFile } from "../js/datfile.js";
 // DOM refs
 // ------------------------------------------------------------------ //
 
-const videoInput = document.getElementById("video-input");
+const mediaInput = document.getElementById("media-input");
 const video = document.getElementById("video");
 const videoWrap = document.getElementById("video-wrap");
 const overlay = document.getElementById("overlay");
@@ -19,8 +19,7 @@ const progressFill = document.getElementById("progress-fill");
 const statusEl = document.getElementById("status");
 
 const previewSection = document.getElementById("preview-section");
-const previewCanvas = document.getElementById("preview-canvas");
-const previewCtx = previewCanvas.getContext("2d");
+const previewContainer = document.getElementById("preview-container");
 
 const downloadDat = document.getElementById("download-dat");
 const downloadTxt = document.getElementById("download-txt");
@@ -49,42 +48,86 @@ let ports = [];
 /** Currently selected point: { port, point } indices, or null */
 let activeSelection = null;
 
-let videoReady = false;
+let mediaReady = false;
+let mediaType = ""; // "video" or "image"
 let detectedFPS = 0;
+/** @type {HTMLImageElement|null} */
+let loadedImage = null;
 /** @type {DATFile|null} */
 let currentDat = null;
 
+/** Width/height of the loaded media in pixels. */
+let mediaW = 0;
+let mediaH = 0;
+
 // ------------------------------------------------------------------ //
-// Video loading
+// Media loading (video or image)
 // ------------------------------------------------------------------ //
 
-videoInput.addEventListener("change", (e) => {
+mediaInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
 
   const url = URL.createObjectURL(file);
+  const isImage = file.type.startsWith("image/");
+
+  if (isImage) {
+    loadImage(url);
+  } else {
+    loadVideo(url);
+  }
+});
+
+function initAfterLoad(w, h) {
+  mediaW = w;
+  mediaH = h;
+  mediaReady = true;
+
+  overlay.width = w;
+  overlay.height = h;
+
+  if (ports.length === 0) {
+    const pad = Math.round(w * 0.1);
+    const cy = Math.round(h / 2);
+    addPort(400, [
+      { x: pad, y: cy },
+      { x: w - pad, y: cy },
+    ]);
+  }
+
+  renderPorts();
+  drawOverlay();
+}
+
+function loadImage(url) {
+  const img = new Image();
+  img.onload = () => {
+    mediaType = "image";
+    loadedImage = img;
+    detectedFPS = 0;
+
+    video.style.display = "none";
+    overlay.classList.add("static");
+
+    initAfterLoad(img.naturalWidth, img.naturalHeight);
+
+    setStatus(`Image loaded: ${img.naturalWidth}x${img.naturalHeight} (1 frame)`);
+  };
+  img.src = url;
+}
+
+function loadVideo(url) {
+  video.style.display = "block";
+  overlay.classList.remove("static");
+  loadedImage = null;
   video.src = url;
   video.load();
 
   video.addEventListener(
     "loadedmetadata",
     async () => {
-      videoReady = true;
-      overlay.width = video.videoWidth;
-      overlay.height = video.videoHeight;
-
-      // Add default port if none exist
-      if (ports.length === 0) {
-        const pad = Math.round(video.videoWidth * 0.1);
-        const cy = Math.round(video.videoHeight / 2);
-        addPort(400, [
-          { x: pad, y: cy },
-          { x: video.videoWidth - pad, y: cy },
-        ]);
-      }
-
-      renderPorts();
-      drawOverlay();
+      mediaType = "video";
+      initAfterLoad(video.videoWidth, video.videoHeight);
 
       setStatus("Detecting frame rate...");
       detectedFPS = await detectFPS();
@@ -96,7 +139,8 @@ videoInput.addEventListener("change", (e) => {
     },
     { once: true }
   );
-});
+}
+
 
 // ------------------------------------------------------------------ //
 // Port / point data model
@@ -104,8 +148,8 @@ videoInput.addEventListener("change", (e) => {
 
 function addPort(leds = 400, points = null) {
   if (!points) {
-    const cx = videoReady ? Math.round(video.videoWidth / 2) : 200;
-    const cy = videoReady ? Math.round(video.videoHeight / 2) : 200;
+    const cx = mediaReady ? Math.round(mediaW / 2) : 200;
+    const cy = mediaReady ? Math.round(mediaH / 2) : 200;
     points = [
       { x: cx - 100, y: cy },
       { x: cx + 100, y: cy },
@@ -276,18 +320,18 @@ addPortBtn.addEventListener("click", () => {
 // ------------------------------------------------------------------ //
 
 videoWrap.addEventListener("click", (e) => {
-  if (!videoReady || !activeSelection) return;
+  if (!mediaReady || !activeSelection) return;
 
   const rect = videoWrap.getBoundingClientRect();
-  const scaleX = video.videoWidth / rect.width;
-  const scaleY = video.videoHeight / rect.height;
+  const scaleX = mediaW / rect.width;
+  const scaleY = mediaH / rect.height;
 
   const x = Math.round((e.clientX - rect.left) * scaleX);
   const y = Math.round((e.clientY - rect.top) * scaleY);
 
   const pt = ports[activeSelection.port].points[activeSelection.point];
-  pt.x = Math.max(0, Math.min(video.videoWidth - 1, x));
-  pt.y = Math.max(0, Math.min(video.videoHeight - 1, y));
+  pt.x = Math.max(0, Math.min(mediaW - 1, x));
+  pt.y = Math.max(0, Math.min(mediaH - 1, y));
 
   renderPorts();
   drawOverlay();
@@ -298,8 +342,13 @@ videoWrap.addEventListener("click", (e) => {
 // ------------------------------------------------------------------ //
 
 function drawOverlay() {
-  if (!videoReady) return;
+  if (!mediaReady) return;
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+  // For images, draw the image as the background
+  if (mediaType === "image" && loadedImage) {
+    overlayCtx.drawImage(loadedImage, 0, 0);
+  }
 
   ports.forEach((port, pi) => {
     const color = PORT_COLORS[pi % PORT_COLORS.length];
@@ -461,8 +510,8 @@ function samplePolyline(ctx, points, numSamples) {
 // ------------------------------------------------------------------ //
 
 processBtn.addEventListener("click", async () => {
-  if (!videoReady) {
-    setStatus("Load a video first.");
+  if (!mediaReady) {
+    setStatus("Load a video or image first.");
     return;
   }
 
@@ -471,8 +520,9 @@ processBtn.addEventListener("click", async () => {
     return;
   }
 
+  const isImage = mediaType === "image";
   const fps = detectedFPS || 30;
-  const totalFrames = Math.floor(video.duration * fps);
+  const totalFrames = isImage ? 1 : Math.floor(video.duration * fps);
 
   if (totalFrames <= 0) {
     setStatus("Could not determine frame count.");
@@ -481,12 +531,15 @@ processBtn.addEventListener("click", async () => {
 
   processBtn.disabled = true;
   progressBar.style.display = "block";
-  setStatus(`Processing ${totalFrames} frames across ${ports.length} port(s)...`);
+  setStatus(isImage
+    ? `Processing 1 frame across ${ports.length} port(s)...`
+    : `Processing ${totalFrames} frames across ${ports.length} port(s)...`
+  );
 
-  // Offscreen canvas
+  // Offscreen canvas for pixel sampling
   const captureCanvas = document.createElement("canvas");
-  captureCanvas.width = video.videoWidth;
-  captureCanvas.height = video.videoHeight;
+  captureCanvas.width = mediaW;
+  captureCanvas.height = mediaH;
   const captureCtx = captureCanvas.getContext("2d");
 
   // Build DAT file — one universe per port
@@ -496,36 +549,37 @@ processBtn.addEventListener("click", async () => {
   }
   dat.setNumFrames(totalFrames);
 
-  // Preview canvas: total LEDs across all ports wide, totalFrames tall
-  const totalLeds = ports.reduce((s, p) => s + p.leds, 0);
-  previewCanvas.width = totalLeds;
-  previewCanvas.height = totalFrames;
+  // Per-port preview canvases
+  const previewCtxs = ports.map((port) => {
+    const c = document.createElement("canvas");
+    c.width = port.leds;
+    c.height = totalFrames;
+    return c.getContext("2d");
+  });
 
   for (let f = 0; f < totalFrames; f++) {
-    const time = f / fps;
-    await seekTo(time);
-    captureCtx.drawImage(video, 0, 0);
-
-    // Sample each port
-    const imgData = previewCtx.createImageData(totalLeds, 1);
-    let previewOffset = 0;
+    if (isImage) {
+      captureCtx.drawImage(loadedImage, 0, 0);
+    } else {
+      await seekTo(f / fps);
+      captureCtx.drawImage(video, 0, 0);
+    }
 
     for (let pi = 0; pi < ports.length; pi++) {
       const port = ports[pi];
       const samples = samplePolyline(captureCtx, port.points, port.leds);
 
+      const imgData = previewCtxs[pi].createImageData(port.leds, 1);
       for (let p = 0; p < port.leds; p++) {
         dat.setPixel(pi, f, p, samples[p * 3], samples[p * 3 + 1], samples[p * 3 + 2]);
 
-        const idx = (previewOffset + p) * 4;
-        imgData.data[idx] = samples[p * 3];
-        imgData.data[idx + 1] = samples[p * 3 + 1];
-        imgData.data[idx + 2] = samples[p * 3 + 2];
-        imgData.data[idx + 3] = 255;
+        imgData.data[p * 4] = samples[p * 3];
+        imgData.data[p * 4 + 1] = samples[p * 3 + 1];
+        imgData.data[p * 4 + 2] = samples[p * 3 + 2];
+        imgData.data[p * 4 + 3] = 255;
       }
-      previewOffset += port.leds;
+      previewCtxs[pi].putImageData(imgData, 0, f);
     }
-    previewCtx.putImageData(imgData, 0, f);
 
     // Progress
     const pct = ((f + 1) / totalFrames) * 100;
@@ -538,7 +592,25 @@ processBtn.addEventListener("click", async () => {
 
   currentDat = dat;
   progressFill.style.width = "100%";
-  setStatus(`Done. ${totalFrames} frames, ${ports.length} port(s), ${totalLeds} total LEDs.`);
+  const totalLeds = ports.reduce((s, p) => s + p.leds, 0);
+  setStatus(`Done. ${totalFrames} frame(s), ${ports.length} port(s), ${totalLeds} total LEDs.`);
+
+  // Build preview section with labels + canvases
+  previewContainer.innerHTML = "";
+  for (let pi = 0; pi < ports.length; pi++) {
+    const color = PORT_COLORS[pi % PORT_COLORS.length];
+
+    const label = document.createElement("div");
+    label.className = "preview-label";
+    label.innerHTML =
+      `<span class="color-dot" style="background:${color}"></span> ` +
+      `Port ${pi} &mdash; ${ports[pi].leds} LEDs`;
+    previewContainer.appendChild(label);
+
+    const canvas = previewCtxs[pi].canvas;
+    canvas.className = "preview-canvas";
+    previewContainer.appendChild(canvas);
+  }
 
   previewSection.style.display = "block";
   downloadDat.disabled = false;

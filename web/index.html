@@ -11,7 +11,7 @@
 
   <!-- Video upload -->
   <section>
-    <input type="file" id="video-input" accept="video/*">
+    <input type="file" id="media-input" accept="video/*,image/*">
   </section>
 
   <!-- Video + overlay (click to place active point) -->
@@ -37,7 +37,7 @@
 
   <!-- Preview + download -->
   <section id="preview-section">
-    <canvas id="preview-canvas"></canvas>
+    <div id="preview-container"></div>
     <div class="btn-group">
       <button id="download-dat" disabled>Download .dat</button>
       <button id="download-txt" disabled>Download .txt</button>

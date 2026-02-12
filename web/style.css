@@ -54,6 +54,11 @@ label {
   pointer-events: none;
 }
 
+/* When video is hidden (image mode), overlay becomes the visible element */
+.video-wrap canvas.static {
+  position: relative;
+}
+
 /* -- inputs -- */
 
 input[type="number"] {
@@ -229,7 +234,20 @@ button:disabled {
   display: none;
 }
 
-#preview-canvas {
+.preview-label {
+  font-size: 0.85rem;
+  color: #ccc;
+  margin: 12px 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-label:first-child {
+  margin-top: 0;
+}
+
+.preview-canvas {
   width: 100%;
   border-radius: 6px;
   image-rendering: pixelated;
