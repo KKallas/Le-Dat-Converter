@@ -276,6 +276,17 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.coord-input {
+  width: 56px;
+  padding: 2px 4px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #16213e;
+  color: #e0e0e0;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
 .point-actions {
   display: flex;
   gap: 4px;

@@ -34,7 +34,7 @@ const DRAG_INTERVAL = 20; // ~50fps throttle for drag updates
 
 /**
  * @typedef {{ x: number, y: number }} Point
- * @typedef {{ pivot: Point, offset: Point, angle: number, scaleX: number, scaleY: number, baseRadius: number }} TransformState
+ * @typedef {{ center: Point, pivot: Point, offset: Point, angle: number, scaleX: number, scaleY: number, baseRadius: number }} TransformState
  * @typedef {{ leds: number, trimStart: number, trimEnd: number, points: Point[], collapsed: boolean, previewCollapsed: boolean, editMode: string, savedPoints: Point[]|null, transformState: TransformState|null }} Port
  * @typedef {{ ports: Port[], collapsed: boolean }} Controller
  */
@@ -47,6 +47,15 @@ let ports = [];
 
 /** Max ports per controller (output setting) */
 let portsPerController = 8;
+
+/** Max resolution (longer side) for imported media frames */
+let maxResolution = 1280;
+
+/** Frame offset — skip this many frames from the start during extraction */
+let frameOffset = 0;
+
+/** Max frame length — extract at most this many frames (0 = entire file) */
+let frameLength = 2000;
 
 /** Currently selected point: { port, point } where port is flat index, or null */
 let activeSelection = null;
@@ -77,10 +86,29 @@ let includeTxt = false;
 let exporting = false;
 let isPlaying = false;
 
-/** @type {ImageBitmap[]} All decoded video frames */
+/** @type {Blob[]} All video frames stored as JPEG blobs */
 let frames = [];
 let currentFrameIdx = 0;
 let playbackTimerId = null;
+
+/** Decoded frame cache — avoids re-decoding the current frame on every draw */
+let decodedFrame = null; // { idx: number, bmp: ImageBitmap }
+
+async function ensureFrameDecoded(idx) {
+  if (decodedFrame && decodedFrame.idx === idx) return decodedFrame.bmp;
+  if (decodedFrame) { decodedFrame.bmp.close(); decodedFrame = null; }
+  const bmp = await createImageBitmap(frames[idx]);
+  decodedFrame = { idx, bmp };
+  return bmp;
+}
+
+function getDecodedFrame() {
+  return decodedFrame ? decodedFrame.bmp : null;
+}
+
+function clearDecodedFrame() {
+  if (decodedFrame) { decodedFrame.bmp.close(); decodedFrame = null; }
+}
 
 // In/out points (frame indices, inclusive)
 let inPoint = 0;
@@ -136,22 +164,24 @@ function updatePlaybackUI() {
   frameLabel.textContent = `${currentFrameIdx} / ${frames.length}  (${t.toFixed(2)}s)`;
 }
 
-function doPlay() {
+async function doPlay() {
   if (frames.length === 0) return;
   if (isPlaying) return;
   // Jump to inPoint if current position is outside the in/out range
   if (currentFrameIdx < inPoint || currentFrameIdx >= outPoint) {
     currentFrameIdx = inPoint;
-    drawOverlay();
+    await drawOverlay();
   }
   isPlaying = true;
   renderOutputSection();
   const fps = detectedFPS || 30;
   const interval = 1000 / fps;
   let lastTime = performance.now();
+  let decoding = false;
 
   function step(now) {
     if (!isPlaying) return;
+    if (decoding) { playbackTimerId = requestAnimationFrame(step); return; }
     if (now - lastTime >= interval) {
       lastTime += interval;
       currentFrameIdx++;
@@ -160,8 +190,16 @@ function doPlay() {
         doPause();
         return;
       }
-      drawOverlay();
-      updatePlaybackUI();
+      decoding = true;
+      ensureFrameDecoded(currentFrameIdx).then((bmp) => {
+        decoding = false;
+        if (!isPlaying) return;
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        overlayCtx.drawImage(bmp, 0, 0);
+        // Redraw port overlays on top
+        drawOverlayPorts();
+        updatePlaybackUI();
+      });
     }
     playbackTimerId = requestAnimationFrame(step);
   }
@@ -179,26 +217,34 @@ function doPause() {
   updateLinePreviews();
 }
 
-function doStop() {
+async function doStop() {
   isPlaying = false;
   if (playbackTimerId) {
     cancelAnimationFrame(playbackTimerId);
     playbackTimerId = null;
   }
   currentFrameIdx = 0;
-  drawOverlay();
+  await drawOverlay();
   updatePlaybackUI();
-  updateLinePreviews();
+  await updateLinePreviews();
   renderOutputSection();
 }
 
-function doSeek(frameIdx) {
+async function doSeek(frameIdx) {
   if (frames.length === 0) return;
   if (isPlaying) doPause();
   currentFrameIdx = Math.max(0, Math.min(frames.length - 1, frameIdx));
-  drawOverlay();
+  await drawOverlay();
   updatePlaybackUI();
-  updateLinePreviews();
+  await updateLinePreviews();
+}
+
+/** Compute downscaled dimensions so the longer side fits maxResolution */
+function clampResolution(w, h) {
+  const longer = Math.max(w, h);
+  if (longer <= maxResolution) return { w, h };
+  const scale = maxResolution / longer;
+  return { w: Math.round(w * scale), h: Math.round(h * scale) };
 }
 
 function initAfterLoad(w, h) {
@@ -234,14 +280,30 @@ function loadImage(url) {
   const img = new Image();
   img.onload = () => {
     mediaType = "image";
-    loadedImage = img;
     detectedFPS = 0;
 
-    video.style.display = "none";
-    overlay.classList.add("static");
-
-    initAfterLoad(img.naturalWidth, img.naturalHeight);
-    setStatus(`Image loaded: ${img.naturalWidth}x${img.naturalHeight} (1 frame)`);
+    const { w, h } = clampResolution(img.naturalWidth, img.naturalHeight);
+    // Downscale if needed
+    if (w !== img.naturalWidth || h !== img.naturalHeight) {
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      const scaled = new Image();
+      scaled.onload = () => {
+        loadedImage = scaled;
+        video.style.display = "none";
+        overlay.classList.add("static");
+        initAfterLoad(w, h);
+        setStatus(`Image loaded: ${img.naturalWidth}x${img.naturalHeight} → ${w}x${h}`);
+      };
+      scaled.src = c.toDataURL();
+    } else {
+      loadedImage = img;
+      video.style.display = "none";
+      overlay.classList.add("static");
+      initAfterLoad(w, h);
+      setStatus(`Image loaded: ${w}x${h} (1 frame)`);
+    }
   };
   img.src = url;
 }
@@ -257,7 +319,8 @@ function loadVideo(url) {
     "loadedmetadata",
     async () => {
       mediaType = "video";
-      initAfterLoad(video.videoWidth, video.videoHeight);
+      const { w, h } = clampResolution(video.videoWidth, video.videoHeight);
+      initAfterLoad(w, h);
 
       setStatus("Detecting frame rate...");
       detectedFPS = await detectFPS();
@@ -270,19 +333,28 @@ function loadVideo(url) {
 
 async function extractFrames() {
   // Free old frames
-  for (const bmp of frames) bmp.close();
+  clearDecodedFrame();
   frames = [];
   currentFrameIdx = 0;
 
   const fps = detectedFPS || 30;
-  const expectedFrames = Math.floor(video.duration * fps);
+  const totalVideoFrames = Math.floor(video.duration * fps);
+  const maxFrames = frameLength > 0 ? Math.min(frameLength, totalVideoFrames - frameOffset) : totalVideoFrames - frameOffset;
+  const expectedFrames = Math.max(0, maxFrames);
 
   setStatus(`Extracting frames (0/${expectedFrames})...`);
   const pBar = document.getElementById("progress-bar");
   const pFill = document.getElementById("progress-fill");
   if (pBar) pBar.style.display = "block";
 
+  // Capture canvas for converting video frames to JPEG blobs
+  const captureCanvas = document.createElement("canvas");
+  captureCanvas.width = mediaW;
+  captureCanvas.height = mediaH;
+  const captureContext = captureCanvas.getContext("2d");
+
   video.currentTime = 0;
+  let rawFrameIdx = 0; // counts all frames from the video
 
   await new Promise((resolve) => {
     let resolved = false;
@@ -296,18 +368,35 @@ async function extractFrames() {
 
     function onFrame() {
       if (resolved) return;
-      createImageBitmap(video).then((bmp) => {
-        if (resolved) { bmp.close(); return; }
-        frames.push(bmp);
+
+      if (rawFrameIdx < frameOffset) {
+        // Skip frames before offset
+        rawFrameIdx++;
+        if (video.ended) { done(); } else { video.requestVideoFrameCallback(onFrame); }
+        return;
+      }
+
+      if (frames.length >= expectedFrames) {
+        done();
+        return;
+      }
+
+      // Draw the current video frame scaled to media dimensions and encode as JPEG blob
+      captureContext.drawImage(video, 0, 0, mediaW, mediaH);
+      captureCanvas.toBlob((blob) => {
+        if (resolved) return;
+        frames.push(blob);
         setStatus(`Extracting frames (${frames.length}/${expectedFrames})...`);
         if (pFill) pFill.style.width = (frames.length / expectedFrames * 100) + "%";
 
-        if (video.ended) {
+        rawFrameIdx++;
+
+        if (video.ended || frames.length >= expectedFrames) {
           done();
         } else {
           video.requestVideoFrameCallback(onFrame);
         }
-      }).catch(() => done());
+      }, "image/jpeg", 0.90);
     }
 
     video.addEventListener("ended", () => setTimeout(done, 200), { once: true });
@@ -457,8 +546,9 @@ function enterTransformMode(port) {
   const baseRadius = Math.max(50, Math.min(maxDist, maxAllowed));
 
   port.transformState = {
-    pivot: { x: Math.round(cx), y: Math.round(cy) },
+    center: { x: Math.round(cx), y: Math.round(cy) },
     offset: { x: 0, y: 0 },
+    pivot: { x: 0, y: 0 },
     angle: 0,
     scaleX: 1,
     scaleY: 1,
@@ -485,23 +575,22 @@ function cancelTransform(port) {
   port.transformState = null;
 }
 
-/** Apply Scale → Rotate → Translate around pivot */
+/** Apply Scale → Rotate → Translate. Effective pivot = center + pivot. Offset moves everything. */
 function computeTransformedPoints(savedPoints, state) {
-  const { pivot, offset, angle, scaleX, scaleY } = state;
+  const { center, pivot, offset, angle, scaleX, scaleY } = state;
+  const epx = center.x + pivot.x; // effective pivot in original space
+  const epy = center.y + pivot.y;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
 
   return savedPoints.map((p) => {
-    // Relative to pivot
-    const rx = (p.x - pivot.x) * scaleX;
-    const ry = (p.y - pivot.y) * scaleY;
-    // Rotate
+    const rx = (p.x - epx) * scaleX;
+    const ry = (p.y - epy) * scaleY;
     const rotX = rx * cos - ry * sin;
     const rotY = rx * sin + ry * cos;
-    // Translate back + offset
     return {
-      x: Math.round(rotX + pivot.x + offset.x),
-      y: Math.round(rotY + pivot.y + offset.y),
+      x: Math.round(rotX + epx + offset.x),
+      y: Math.round(rotY + epy + offset.y),
     };
   });
 }
@@ -510,14 +599,20 @@ function computeTransformedPoints(savedPoints, state) {
 function getTransformControlPoints(port) {
   const s = port.transformState;
   if (!s) return [];
-  const sr = s.baseRadius / 2; // scale handles use half radius
+  const sr = s.baseRadius / 2;
+  // Widget center (offset handle) in world space
+  const wx = s.center.x + s.offset.x;
+  const wy = s.center.y + s.offset.y;
+  // Effective pivot in world space
+  const px = wx + s.pivot.x;
+  const py = wy + s.pivot.y;
 
   return [
-    { key: "pivot",  x: s.pivot.x, y: s.pivot.y },
-    { key: "offset", x: s.pivot.x + s.offset.x, y: s.pivot.y + s.offset.y },
-    { key: "rotate", x: s.pivot.x + s.baseRadius * Math.cos(s.angle), y: s.pivot.y + s.baseRadius * Math.sin(s.angle) },
-    { key: "scaleX", x: s.pivot.x + sr * s.scaleX, y: s.pivot.y },
-    { key: "scaleY", x: s.pivot.x, y: s.pivot.y + sr * s.scaleY },
+    { key: "offset", x: wx, y: wy },
+    { key: "pivot",  x: px, y: py },
+    { key: "rotate", x: px + s.baseRadius * Math.cos(s.angle), y: py + s.baseRadius * Math.sin(s.angle) },
+    { key: "scaleX", x: px + sr * s.scaleX, y: py },
+    { key: "scaleY", x: px, y: py + sr * s.scaleY },
   ];
 }
 
@@ -569,7 +664,17 @@ function renderOutputSection() {
   exportBtn.disabled = exporting;
   exportBtn.addEventListener("click", doExport);
 
-  header.append(toggle, label, exportBtn);
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-small";
+  saveBtn.textContent = "Save Scene";
+  saveBtn.addEventListener("click", saveScene);
+
+  const loadBtn = document.createElement("button");
+  loadBtn.className = "btn-small";
+  loadBtn.textContent = "Load Scene";
+  loadBtn.addEventListener("click", loadScene);
+
+  header.append(toggle, label, exportBtn, saveBtn, loadBtn);
   card.appendChild(header);
 
   if (!outputCollapsed) {
@@ -659,6 +764,93 @@ function renderOutputSection() {
     ppcRow.append(ppcLabel, ppcInput);
     body.appendChild(ppcRow);
 
+    // Max resolution row
+    const resRow = document.createElement("div");
+    resRow.className = "point-row";
+    resRow.style.cursor = "default";
+
+    const resLabel = document.createElement("label");
+    resLabel.style.cssText = "font-size:0.8rem;color:#aaa;white-space:nowrap";
+    resLabel.textContent = "Max resolution";
+
+    const resInput = document.createElement("input");
+    resInput.type = "number";
+    resInput.min = "64";
+    resInput.max = "3840";
+    resInput.value = String(maxResolution);
+    resInput.style.width = "56px";
+    resInput.addEventListener("change", () => {
+      maxResolution = Math.max(64, Math.min(3840, parseInt(resInput.value) || 1280));
+      resInput.value = maxResolution;
+    });
+
+    const resHint = document.createElement("span");
+    resHint.style.cssText = "font-size:0.7rem;color:#666";
+    resHint.textContent = mediaReady ? `(${mediaW}\u00d7${mediaH})` : "";
+
+    resRow.append(resLabel, resInput, resHint);
+    body.appendChild(resRow);
+
+    // Frame offset row
+    const offRow = document.createElement("div");
+    offRow.className = "point-row";
+    offRow.style.cursor = "default";
+
+    const offLabel = document.createElement("label");
+    offLabel.style.cssText = "font-size:0.8rem;color:#aaa;white-space:nowrap";
+    offLabel.textContent = "Frame offset";
+
+    const offInput = document.createElement("input");
+    offInput.type = "number";
+    offInput.min = "0";
+    offInput.value = String(frameOffset);
+    offInput.style.width = "56px";
+    offInput.addEventListener("change", () => {
+      frameOffset = Math.max(0, parseInt(offInput.value) || 0);
+      offInput.value = frameOffset;
+    });
+
+    offRow.append(offLabel, offInput);
+    body.appendChild(offRow);
+
+    // Frame length row
+    const lenRow = document.createElement("div");
+    lenRow.className = "point-row";
+    lenRow.style.cursor = "default";
+
+    const lenLabel = document.createElement("label");
+    lenLabel.style.cssText = "font-size:0.8rem;color:#aaa;white-space:nowrap";
+    lenLabel.textContent = "Frame length";
+
+    const lenInput = document.createElement("input");
+    lenInput.type = "number";
+    lenInput.min = "0";
+    lenInput.value = String(frameLength);
+    lenInput.style.width = "56px";
+    lenInput.addEventListener("change", () => {
+      frameLength = Math.max(0, parseInt(lenInput.value) || 0);
+      lenInput.value = frameLength;
+    });
+
+    lenRow.append(lenLabel, lenInput);
+    body.appendChild(lenRow);
+
+    // Memory estimate (JPEG blobs ~150KB/frame at 1280×720 @ 90% quality)
+    const estW = mediaReady ? mediaW : maxResolution;
+    const estH = mediaReady ? mediaH : Math.round(maxResolution * 9 / 16);
+    const estFrames = frames.length > 0 ? frames.length : (frameLength > 0 ? frameLength : 5000);
+    const bytesPerFrame = Math.round(estW * estH * 0.16); // JPEG ~0.16 bytes/pixel at 90%
+    const estMB = Math.round(bytesPerFrame * estFrames / 1024 / 1024);
+    const memRow = document.createElement("div");
+    memRow.className = "point-row";
+    memRow.style.cursor = "default";
+    const memHint = document.createElement("span");
+    const warn = estMB > 2000;
+    memHint.style.cssText = "font-size:0.7rem;color:" + (warn ? "#e94560" : "#666");
+    memHint.textContent = `~${estMB} MB for ${estFrames}f at ${estW}\u00d7${estH} (JPEG)` + (warn ? " (may crash)" : "");
+    memRow.appendChild(memHint);
+    body.appendChild(memRow);
+
     // In/out point controls (only when frames are extracted)
     if (frames.length > 0) {
       const ioRow = document.createElement("div");
@@ -745,10 +937,16 @@ function renderOutputSection() {
       const outCtx = outThumb.getContext("2d");
 
       if (frames[inPoint]) {
-        inCtx.drawImage(frames[inPoint], 0, 0, thumbW, thumbH);
+        createImageBitmap(frames[inPoint]).then((bmp) => {
+          inCtx.drawImage(bmp, 0, 0, thumbW, thumbH);
+          bmp.close();
+        });
       }
       if (frames[outPoint]) {
-        outCtx.drawImage(frames[outPoint], 0, 0, thumbW, thumbH);
+        createImageBitmap(frames[outPoint]).then((bmp) => {
+          outCtx.drawImage(bmp, 0, 0, thumbW, thumbH);
+          bmp.close();
+        });
       }
 
       const inThumbLabel = document.createElement("span");
@@ -1108,7 +1306,7 @@ function renderPorts() {
           }
           if (next === "transform" && prev !== "transform") {
             enterTransformMode(port);
-            activeSelection = { port: globalIdx, control: "pivot" };
+            activeSelection = { port: globalIdx, control: "offset" };
           }
           if (next === "saveload") {
             port.editMode = "saveload";
@@ -1129,21 +1327,42 @@ function renderPorts() {
           port.points.forEach((pt, pti) => {
             const row = document.createElement("div");
             row.className = "point-row";
-            if (activeSelection &&
+            const isActive = activeSelection &&
                 activeSelection.port === globalIdx &&
-                activeSelection.point === pti) {
-              row.classList.add("active");
-            }
+                activeSelection.point === pti;
+            if (isActive) row.classList.add("active");
 
             const ptLabel = document.createElement("span");
             ptLabel.className = "point-label";
             ptLabel.textContent = String.fromCharCode(65 + pti);
 
-            const coords = document.createElement("span");
-            coords.className = "coords";
-            coords.textContent = `(${pt.x}, ${pt.y})`;
+            const xIn = document.createElement("input");
+            xIn.type = "number";
+            xIn.className = "coord-input";
+            xIn.value = pt.x;
+            xIn.addEventListener("change", () => {
+              pt.x = Math.max(0, Math.min(mediaW - 1, parseInt(xIn.value) || 0));
+              xIn.value = pt.x;
+              markPortDirty(port);
+              drawOverlay();
+              updateLinePreviews();
+            });
+            xIn.addEventListener("click", (e) => e.stopPropagation());
 
-            row.append(ptLabel, coords);
+            const yIn = document.createElement("input");
+            yIn.type = "number";
+            yIn.className = "coord-input";
+            yIn.value = pt.y;
+            yIn.addEventListener("change", () => {
+              pt.y = Math.max(0, Math.min(mediaH - 1, parseInt(yIn.value) || 0));
+              yIn.value = pt.y;
+              markPortDirty(port);
+              drawOverlay();
+              updateLinePreviews();
+            });
+            yIn.addEventListener("click", (e) => e.stopPropagation());
+
+            row.append(ptLabel, xIn, yIn);
 
             if (port.points.length > 2) {
               const rmPt = document.createElement("button");
@@ -1191,39 +1410,83 @@ function renderPorts() {
           const controlsList = document.createElement("div");
           controlsList.className = "points-list";
 
-          const controlDefs = [
-            { key: "pivot",  label: "Pivot",  value: s ? `(${Math.round(s.pivot.x)}, ${Math.round(s.pivot.y)})` : "" },
-            { key: "offset", label: "Offset", value: s ? `(${Math.round(s.offset.x)}, ${Math.round(s.offset.y)})` : "" },
-            { key: "rotate", label: "Rotate", value: s ? `${(s.angle * 180 / Math.PI).toFixed(1)}\u00b0` : "" },
-            { key: "scaleX", label: "ScaleX", value: s ? s.scaleX.toFixed(2) : "" },
-            { key: "scaleY", label: "ScaleY", value: s ? s.scaleY.toFixed(2) : "" },
-          ];
-
-          for (const cd of controlDefs) {
+          /** Helper: create a control row with editable input(s) */
+          function makeControlRow(key, label, inputs) {
             const row = document.createElement("div");
             row.className = "point-row";
             if (activeSelection &&
                 activeSelection.port === globalIdx &&
                 "control" in activeSelection &&
-                activeSelection.control === cd.key) {
+                activeSelection.control === key) {
               row.classList.add("active");
             }
-
             const lbl = document.createElement("span");
             lbl.className = "point-label";
-            lbl.textContent = cd.label;
-
-            const val = document.createElement("span");
-            val.className = "coords";
-            val.textContent = cd.value;
-
-            row.append(lbl, val);
+            lbl.textContent = label;
+            row.append(lbl, ...inputs);
             row.addEventListener("click", () => {
-              activeSelection = { port: globalIdx, control: cd.key };
+              activeSelection = { port: globalIdx, control: key };
               renderPorts();
               drawOverlay();
             });
-            controlsList.appendChild(row);
+            return row;
+          }
+
+          function applyTransformInputs() {
+            port.points = computeTransformedPoints(port.savedPoints, s);
+            drawOverlay();
+            updateLinePreviews();
+          }
+
+          if (s) {
+            // Offset (x, y) — primary: moves the whole widget
+            const ofX = document.createElement("input");
+            ofX.type = "number"; ofX.className = "coord-input"; ofX.value = Math.round(s.offset.x);
+            ofX.addEventListener("click", (e) => e.stopPropagation());
+            ofX.addEventListener("change", () => { s.offset.x = parseInt(ofX.value) || 0; applyTransformInputs(); });
+            const ofY = document.createElement("input");
+            ofY.type = "number"; ofY.className = "coord-input"; ofY.value = Math.round(s.offset.y);
+            ofY.addEventListener("click", (e) => e.stopPropagation());
+            ofY.addEventListener("change", () => { s.offset.y = parseInt(ofY.value) || 0; applyTransformInputs(); });
+            controlsList.appendChild(makeControlRow("offset", "Offset", [ofX, ofY]));
+
+            // Pivot (x, y) — relative to offset, adjusts rotation/scale center
+            const pvX = document.createElement("input");
+            pvX.type = "number"; pvX.className = "coord-input"; pvX.value = Math.round(s.pivot.x);
+            pvX.addEventListener("click", (e) => e.stopPropagation());
+            pvX.addEventListener("change", () => { s.pivot.x = parseInt(pvX.value) || 0; applyTransformInputs(); });
+            const pvY = document.createElement("input");
+            pvY.type = "number"; pvY.className = "coord-input"; pvY.value = Math.round(s.pivot.y);
+            pvY.addEventListener("click", (e) => e.stopPropagation());
+            pvY.addEventListener("change", () => { s.pivot.y = parseInt(pvY.value) || 0; applyTransformInputs(); });
+            controlsList.appendChild(makeControlRow("pivot", "Pivot", [pvX, pvY]));
+
+            // Rotate (degrees)
+            const rotIn = document.createElement("input");
+            rotIn.type = "number"; rotIn.className = "coord-input"; rotIn.step = "0.1";
+            rotIn.value = (s.angle * 180 / Math.PI).toFixed(1);
+            rotIn.addEventListener("click", (e) => e.stopPropagation());
+            rotIn.addEventListener("change", () => { s.angle = (parseFloat(rotIn.value) || 0) * Math.PI / 180; applyTransformInputs(); });
+            const degLabel = document.createElement("span");
+            degLabel.className = "coords";
+            degLabel.textContent = "\u00b0";
+            controlsList.appendChild(makeControlRow("rotate", "Rotate", [rotIn, degLabel]));
+
+            // ScaleX
+            const sxIn = document.createElement("input");
+            sxIn.type = "number"; sxIn.className = "coord-input"; sxIn.step = "0.01";
+            sxIn.value = s.scaleX.toFixed(2);
+            sxIn.addEventListener("click", (e) => e.stopPropagation());
+            sxIn.addEventListener("change", () => { s.scaleX = parseFloat(sxIn.value) || 1; applyTransformInputs(); });
+            controlsList.appendChild(makeControlRow("scaleX", "ScaleX", [sxIn]));
+
+            // ScaleY
+            const syIn = document.createElement("input");
+            syIn.type = "number"; syIn.className = "coord-input"; syIn.step = "0.01";
+            syIn.value = s.scaleY.toFixed(2);
+            syIn.addEventListener("click", (e) => e.stopPropagation());
+            syIn.addEventListener("change", () => { s.scaleY = parseFloat(syIn.value) || 1; applyTransformInputs(); });
+            controlsList.appendChild(makeControlRow("scaleY", "ScaleY", [syIn]));
           }
 
           div.appendChild(controlsList);
@@ -1338,14 +1601,15 @@ addPortBtn.addEventListener("click", () => {
 // Live line preview sampling
 // ------------------------------------------------------------------ //
 
-function updateLinePreviews() {
+async function updateLinePreviews() {
   if (!mediaReady || !sampleCtx) return;
 
   // Draw current frame onto sample canvas
   if (mediaType === "image" && loadedImage) {
     sampleCtx.drawImage(loadedImage, 0, 0);
   } else if (mediaType === "video" && frames.length > 0) {
-    sampleCtx.drawImage(frames[currentFrameIdx], 0, 0);
+    const bmp = await ensureFrameDecoded(currentFrameIdx);
+    sampleCtx.drawImage(bmp, 0, 0);
   }
 
   ports.forEach((port, pi) => {
@@ -1431,7 +1695,9 @@ async function processPortPreview(port) {
       if (isImage) {
         captureCtx.drawImage(loadedImage, 0, 0);
       } else {
-        captureCtx.drawImage(frames[rangeStart + f], 0, 0);
+        const bmp = await createImageBitmap(frames[rangeStart + f]);
+        captureCtx.drawImage(bmp, 0, 0);
+        bmp.close();
       }
 
       const samples = samplePortLine(captureCtx, port);
@@ -1499,7 +1765,9 @@ async function processMultiPortPreviews(portsToRender) {
       if (isImage) {
         captureCtx.drawImage(loadedImage, 0, 0);
       } else {
-        captureCtx.drawImage(frames[rangeStart + f], 0, 0);
+        const bmp = await createImageBitmap(frames[rangeStart + f]);
+        captureCtx.drawImage(bmp, 0, 0);
+        bmp.close();
       }
 
       for (const { port, prevCtx } of portData) {
@@ -1542,8 +1810,9 @@ async function processMultiPortPreviews(portsToRender) {
 
 function getMediaCoords(e) {
   const rect = videoWrap.getBoundingClientRect();
-  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const touch = e.touches?.[0] || e.changedTouches?.[0];
+  const clientX = touch ? touch.clientX : e.clientX;
+  const clientY = touch ? touch.clientY : e.clientY;
   return {
     x: Math.round((clientX - rect.left) * (mediaW / rect.width)),
     y: Math.round((clientY - rect.top) * (mediaH / rect.height)),
@@ -1559,20 +1828,22 @@ function moveActivePoint(x, y) {
     const s = port.transformState;
     const key = activeSelection.control;
 
-    if (key === "pivot") {
-      s.pivot.x = x;
-      s.pivot.y = y;
-    } else if (key === "offset") {
-      s.offset.x = x - s.pivot.x;
-      s.offset.y = y - s.pivot.y;
+    // Effective pivot in world space
+    const px = s.center.x + s.offset.x + s.pivot.x;
+    const py = s.center.y + s.offset.y + s.pivot.y;
+
+    if (key === "offset") {
+      s.offset.x = x - s.center.x;
+      s.offset.y = y - s.center.y;
+    } else if (key === "pivot") {
+      s.pivot.x = x - s.center.x - s.offset.x;
+      s.pivot.y = y - s.center.y - s.offset.y;
     } else if (key === "rotate") {
-      s.angle = Math.atan2(y - s.pivot.y, x - s.pivot.x);
+      s.angle = Math.atan2(y - py, x - px);
     } else if (key === "scaleX") {
-      const dist = x - s.pivot.x;
-      s.scaleX = dist / (s.baseRadius / 2);
+      s.scaleX = (x - px) / (s.baseRadius / 2);
     } else if (key === "scaleY") {
-      const dist = y - s.pivot.y;
-      s.scaleY = dist / (s.baseRadius / 2);
+      s.scaleY = (y - py) / (s.baseRadius / 2);
     }
 
     // Update the live polyline for the port
@@ -1585,18 +1856,52 @@ function moveActivePoint(x, y) {
   }
 }
 
-function onDragStart(e) {
-  if (!mediaReady || !activeSelection) return;
-  dragging = true;
-  const { x, y } = getMediaCoords(e);
-  moveActivePoint(x, y);
-  renderPorts();
-  drawOverlay();
-  updateLinePreviews();
-  lastDragUpdate = performance.now();
+/** Find the closest draggable point/control to (mx, my) across all ports */
+function findClosestPoint(mx, my) {
+  let best = null;
+  let bestDist = Infinity;
+
+  ports.forEach((port, pi) => {
+    if (port.editMode === "transform" && port.transformState) {
+      for (const cp of getTransformControlPoints(port)) {
+        const d = (cp.x - mx) ** 2 + (cp.y - my) ** 2;
+        if (d < bestDist) { bestDist = d; best = { port: pi, control: cp.key }; }
+      }
+    } else {
+      port.points.forEach((pt, pti) => {
+        const d = (pt.x - mx) ** 2 + (pt.y - my) ** 2;
+        if (d < bestDist) { bestDist = d; best = { port: pi, point: pti }; }
+      });
+    }
+  });
+
+  return best;
 }
 
-function onDragMove(e) {
+// Pointer state: unified click / double-click / drag detection
+let pointerDown = false;
+let pointerDownPos = null; // media coords at press
+const DRAG_THRESHOLD = 5; // px in media coords before drag starts
+
+function onPointerDown(e) {
+  if (!mediaReady) return;
+  pointerDown = true;
+  pointerDownPos = getMediaCoords(e);
+}
+
+function onPointerMove(e) {
+  if (!pointerDown) return;
+
+  // Start drag only after moving past threshold
+  if (!dragging && pointerDownPos && activeSelection) {
+    const { x, y } = getMediaCoords(e);
+    const dx = x - pointerDownPos.x;
+    const dy = y - pointerDownPos.y;
+    if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+    dragging = true;
+    lastDragUpdate = performance.now();
+  }
+
   if (!dragging) return;
   e.preventDefault();
 
@@ -1608,82 +1913,117 @@ function onDragMove(e) {
   moveActivePoint(x, y);
   drawOverlay();
   updateLinePreviews();
-  // Update just the active point's coords display without full re-render
   updateActiveCoords();
 }
 
-function onDragEnd() {
+function onPointerUp() {
+  pointerDown = false;
+  pointerDownPos = null;
   if (!dragging) return;
   dragging = false;
   if (activeSelection) {
     const port = ports[activeSelection.port];
-    // Only mark dirty in points mode (transform applies on "Apply")
     if ("point" in activeSelection) {
       markPortDirty(port);
     }
   }
-  renderPorts(); // full re-render to sync everything
+  renderPorts();
 }
 
-/** Fast update of only the active point's coordinate text or transform readout */
+/** Double-click / double-tap: select closest point */
+function onDblSelect(e) {
+  if (!mediaReady) return;
+  e.preventDefault();
+  const { x, y } = getMediaCoords(e);
+  const closest = findClosestPoint(x, y);
+  if (closest) {
+    activeSelection = closest;
+    renderPorts();
+    drawOverlay();
+  }
+}
+
+/** Fast update of only the active row's input values during drag */
 function updateActiveCoords() {
   if (!activeSelection) return;
   const port = ports[activeSelection.port];
 
   if ("control" in activeSelection && port.transformState) {
-    // Update all transform control values in their rows
     const s = port.transformState;
-    const rows = portsList.querySelectorAll(".point-row");
-    const vals = {
-      "Pivot":  `(${Math.round(s.pivot.x)}, ${Math.round(s.pivot.y)})`,
-      "Offset": `(${Math.round(s.offset.x)}, ${Math.round(s.offset.y)})`,
-      "Rotate": `${(s.angle * 180 / Math.PI).toFixed(1)}\u00b0`,
-      "ScaleX": s.scaleX.toFixed(2),
-      "ScaleY": s.scaleY.toFixed(2),
+    const inputMap = {
+      "Offset": [Math.round(s.offset.x), Math.round(s.offset.y)],
+      "Pivot":  [Math.round(s.pivot.x), Math.round(s.pivot.y)],
+      "Rotate": [(s.angle * 180 / Math.PI).toFixed(1)],
+      "ScaleX": [s.scaleX.toFixed(2)],
+      "ScaleY": [s.scaleY.toFixed(2)],
     };
+    const rows = portsList.querySelectorAll(".point-row");
     rows.forEach((row) => {
       const lbl = row.querySelector(".point-label");
-      const coords = row.querySelector(".coords");
-      if (lbl && coords && vals[lbl.textContent]) {
-        coords.textContent = vals[lbl.textContent];
-      }
+      if (!lbl || !inputMap[lbl.textContent]) return;
+      const inputs = row.querySelectorAll(".coord-input");
+      const vals = inputMap[lbl.textContent];
+      inputs.forEach((inp, i) => {
+        if (i < vals.length && document.activeElement !== inp) inp.value = vals[i];
+      });
     });
   } else if ("point" in activeSelection) {
     const pt = port.points[activeSelection.point];
-    const activeRow = portsList.querySelector(".point-row.active .coords");
+    const activeRow = portsList.querySelector(".point-row.active");
     if (activeRow) {
-      activeRow.textContent = `(${pt.x}, ${pt.y})`;
+      const inputs = activeRow.querySelectorAll(".coord-input");
+      if (inputs[0] && document.activeElement !== inputs[0]) inputs[0].value = pt.x;
+      if (inputs[1] && document.activeElement !== inputs[1]) inputs[1].value = pt.y;
     }
   }
 }
 
 // Mouse events
-videoWrap.addEventListener("mousedown", onDragStart);
-window.addEventListener("mousemove", onDragMove);
-window.addEventListener("mouseup", onDragEnd);
+videoWrap.addEventListener("mousedown", onPointerDown);
+window.addEventListener("mousemove", onPointerMove);
+window.addEventListener("mouseup", onPointerUp);
+videoWrap.addEventListener("dblclick", onDblSelect);
 
 // Touch events
 videoWrap.addEventListener("touchstart", (e) => {
   e.preventDefault();
-  onDragStart(e);
+  onPointerDown(e);
 }, { passive: false });
-window.addEventListener("touchmove", (e) => { onDragMove(e); }, { passive: false });
-window.addEventListener("touchend", onDragEnd);
+window.addEventListener("touchmove", (e) => { onPointerMove(e); }, { passive: false });
+window.addEventListener("touchend", onPointerUp);
+
+// Double-tap detection for touch
+let lastTapTime = 0;
+videoWrap.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTapTime < 300) {
+    onDblSelect(e);
+    lastTapTime = 0;
+  } else {
+    lastTapTime = now;
+  }
+});
 
 // ------------------------------------------------------------------ //
 // Overlay drawing
 // ------------------------------------------------------------------ //
 
-function drawOverlay() {
+async function drawOverlay() {
   if (!mediaReady) return;
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
   if (mediaType === "image" && loadedImage) {
     overlayCtx.drawImage(loadedImage, 0, 0);
   } else if (mediaType === "video" && frames.length > 0) {
-    overlayCtx.drawImage(frames[currentFrameIdx], 0, 0);
+    const bmp = await ensureFrameDecoded(currentFrameIdx);
+    overlayCtx.drawImage(bmp, 0, 0);
   }
 
+  drawOverlayPorts();
+}
+
+/** Draw port polylines and control points on the overlay (no background clear/draw) */
+function drawOverlayPorts() {
   ports.forEach((port, pi) => {
     const color = PORT_COLORS[pi % PORT_COLORS.length];
 
@@ -1730,8 +2070,21 @@ function drawOverlay() {
           "control" in activeSelection &&
           activeSelection.control === cp.key;
 
-        if (cp.key === "pivot") {
-          // Draw pivot as crosshair
+        if (cp.key === "offset") {
+          // Offset: square handle (primary move)
+          const sz = isActive ? 8 : 6;
+          overlayCtx.fillStyle = isActive ? "#fff" : "#00ff88";
+          overlayCtx.fillRect(cp.x - sz, cp.y - sz, sz * 2, sz * 2);
+          if (isActive) {
+            overlayCtx.strokeStyle = "#fff";
+            overlayCtx.lineWidth = 2;
+            overlayCtx.strokeRect(cp.x - sz - 3, cp.y - sz - 3, (sz + 3) * 2, (sz + 3) * 2);
+          }
+          overlayCtx.fillStyle = "#fff";
+          overlayCtx.font = "11px sans-serif";
+          overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
+        } else if (cp.key === "pivot") {
+          // Pivot: crosshair + diamond
           const sz = 8;
           overlayCtx.strokeStyle = isActive ? "#fff" : "#ffaa00";
           overlayCtx.lineWidth = 2;
@@ -1739,7 +2092,6 @@ function drawOverlay() {
           overlayCtx.moveTo(cp.x - sz, cp.y); overlayCtx.lineTo(cp.x + sz, cp.y);
           overlayCtx.moveTo(cp.x, cp.y - sz); overlayCtx.lineTo(cp.x, cp.y + sz);
           overlayCtx.stroke();
-          // Diamond shape
           overlayCtx.beginPath();
           overlayCtx.moveTo(cp.x, cp.y - sz);
           overlayCtx.lineTo(cp.x + sz, cp.y);
@@ -1766,8 +2118,20 @@ function drawOverlay() {
           overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
         }
 
-        // Draw line from pivot to handle for rotate/scale
-        if (cp.key !== "pivot") {
+        // Draw dashed lines: offset→pivot, pivot→rotate/scale handles
+        if (cp.key === "pivot") {
+          const off = controls.find((c) => c.key === "offset");
+          if (off) {
+            overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
+            overlayCtx.lineWidth = 1;
+            overlayCtx.setLineDash([4, 4]);
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(off.x, off.y);
+            overlayCtx.lineTo(cp.x, cp.y);
+            overlayCtx.stroke();
+            overlayCtx.setLineDash([]);
+          }
+        } else if (cp.key !== "offset") {
           const pivot = controls.find((c) => c.key === "pivot");
           if (pivot) {
             overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
@@ -2101,6 +2465,352 @@ function downloadBlob(blob, filename) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ------------------------------------------------------------------ //
+// Scene save / load (JS + PNGs in a zip)
+// ------------------------------------------------------------------ //
+
+/**
+ * Serialize the current scene to a human-readable JS string.
+ * @param {Map<Port, string>|null} previewFileMap - maps port → filename in the zip
+ */
+function serializeScene(previewFileMap) {
+  const scene = {
+    version: 1,
+    portsPerController,
+    maxResolution,
+    frameOffset,
+    frameLength,
+    detectedFPS,
+    mediaType,
+    mediaW,
+    mediaH,
+    frameCount: frames.length,
+    inPoint,
+    outPoint,
+    templateHeader: templateHeaderBuffer
+      ? btoa(String.fromCharCode(...new Uint8Array(templateHeaderBuffer.slice(0, 512))))
+      : null,
+    templateFileName,
+    controllers: controllers.map((ctrl) => ({
+      collapsed: ctrl.collapsed,
+      ports: ctrl.ports.map((port) => {
+        const p = {
+          leds: port.leds,
+          trimStart: port.trimStart,
+          trimEnd: port.trimEnd,
+          points: port.points.map((pt) => ({ x: pt.x, y: pt.y })),
+          collapsed: port.collapsed,
+          previewCollapsed: port.previewCollapsed,
+          editMode: "points",
+        };
+        if (previewFileMap && previewFileMap.has(port)) {
+          const canvas = portPreviewCanvases.get(port);
+          p.previewFile = previewFileMap.get(port);
+          p.previewMeta = {
+            totalFrames: canvas._totalFrames || 1,
+            fps: canvas._fps || 30,
+            leds: canvas._leds || port.leds,
+          };
+        }
+        return p;
+      }),
+    })),
+  };
+
+  return "// Le-Dat Converter Scene\n"
+    + "// Load this file in the app to restore the scene.\n"
+    + "const scene = " + JSON.stringify(scene, null, 2) + ";\n";
+}
+
+/** Convert a canvas to a Uint8Array in the given format */
+function canvasToBlob(canvas, type = "image/png", quality) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      blob.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
+    }, type, quality);
+  });
+}
+
+/** Convert an ImageBitmap or HTMLImageElement to a JPEG Uint8Array */
+function imageToJPEG(img, w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  c.getContext("2d").drawImage(img, 0, 0);
+  return canvasToBlob(c, "image/jpeg", 0.50);
+}
+
+async function saveScene() {
+  setStatus("Saving scene...");
+  const zipFiles = [];
+  const previewFileMap = new Map();
+
+  // 1. Collect preview PNGs (pixel-exact, keep lossless)
+  let ci = 0;
+  for (const ctrl of controllers) {
+    let pi = 0;
+    for (const port of ctrl.ports) {
+      const canvas = portPreviewCanvases.get(port);
+      if (canvas) {
+        const filename = `preview_${ci}_${pi}.png`;
+        previewFileMap.set(port, filename);
+        const pngBytes = await canvasToBlob(canvas);
+        zipFiles.push({ name: filename, data: pngBytes });
+      }
+      pi++;
+    }
+    ci++;
+  }
+
+  // 2. Save media as JPEG (image or video frames)
+  if (mediaType === "image" && loadedImage) {
+    setStatus("Saving image...");
+    const jpgBytes = await imageToJPEG(loadedImage, mediaW, mediaH);
+    zipFiles.push({ name: "media.jpg", data: jpgBytes });
+  } else if (mediaType === "video" && frames.length > 0) {
+    for (let i = 0; i < frames.length; i++) {
+      if (i % 10 === 0) {
+        setStatus(`Saving frames (${i}/${frames.length})...`);
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      // Frames are already JPEG blobs — just grab the bytes directly
+      const buf = await frames[i].arrayBuffer();
+      zipFiles.push({ name: `frames/${String(i).padStart(5, "0")}.jpg`, data: new Uint8Array(buf) });
+    }
+  }
+
+  // 3. Build scene.js (after previews so previewFileMap is complete)
+  setStatus("Packing zip...");
+  await new Promise((r) => setTimeout(r, 0));
+  const sceneText = serializeScene(previewFileMap);
+  zipFiles.unshift({ name: "scene.js", data: new TextEncoder().encode(sceneText) });
+
+  // 4. Build and download zip
+  const zip = buildZip(zipFiles);
+  downloadBlob(zip, "scene.zip");
+  setStatus("Scene saved.");
+}
+
+/**
+ * Parse a STORE-method zip into { name, data } entries.
+ * @param {ArrayBuffer} buffer
+ * @returns {{ name: string, data: Uint8Array }[]}
+ */
+function parseZip(buffer) {
+  const view = new DataView(buffer);
+  const files = [];
+  let offset = 0;
+
+  while (offset + 30 <= buffer.byteLength) {
+    const sig = view.getUint32(offset, true);
+    if (sig !== 0x04034b50) break;
+
+    const compSize = view.getUint32(offset + 18, true);
+    const nameLen = view.getUint16(offset + 26, true);
+    const extraLen = view.getUint16(offset + 28, true);
+
+    const nameBytes = new Uint8Array(buffer, offset + 30, nameLen);
+    const name = new TextDecoder().decode(nameBytes);
+
+    const dataStart = offset + 30 + nameLen + extraLen;
+    const data = new Uint8Array(buffer.slice(dataStart, dataStart + compSize));
+
+    files.push({ name, data });
+    offset = dataStart + compSize;
+  }
+
+  return files;
+}
+
+/**
+ * Deserialize a scene JS string and restore all state.
+ * @param {string} text - the scene.js content
+ * @param {Map<string, Uint8Array>|null} fileMap - zip entries keyed by filename
+ */
+async function deserializeScene(text, fileMap) {
+  const jsonMatch = text.match(/const\s+scene\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
+  if (!jsonMatch) throw new Error("Invalid scene file format");
+
+  const scene = JSON.parse(jsonMatch[1]);
+
+  // Clear existing state
+  for (const port of ports) {
+    portDirty.delete(port);
+    portPreviewCanvases.delete(port);
+    portPreviewProcessing.delete(port);
+  }
+  clearDecodedFrame();
+  frames = [];
+  loadedImage = null;
+  controllers = [];
+  ports = [];
+  activeSelection = null;
+  currentFrameIdx = 0;
+
+  // Restore settings
+  if (scene.portsPerController != null) portsPerController = scene.portsPerController;
+  if (scene.maxResolution != null) maxResolution = scene.maxResolution;
+  if (scene.frameOffset != null) frameOffset = scene.frameOffset;
+  if (scene.frameLength != null) frameLength = scene.frameLength;
+  if (scene.detectedFPS != null) detectedFPS = scene.detectedFPS;
+  if (scene.inPoint != null) inPoint = scene.inPoint;
+  if (scene.outPoint != null) outPoint = scene.outPoint;
+
+  // Restore template header
+  if (scene.templateHeader) {
+    const binary = atob(scene.templateHeader);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    templateHeaderBuffer = bytes.buffer;
+    templateFileName = scene.templateFileName || "restored.dat";
+  }
+
+  // Restore media infrastructure
+  const w = scene.mediaW || 0;
+  const h = scene.mediaH || 0;
+  if (w > 0 && h > 0) {
+    mediaW = w;
+    mediaH = h;
+    mediaType = scene.mediaType || "";
+    mediaReady = true;
+
+    overlay.width = w;
+    overlay.height = h;
+    video.style.display = "none";
+    overlay.classList.add("static");
+
+    sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = w;
+    sampleCanvas.height = h;
+    sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+  }
+
+  // Restore media content from zip
+  if (fileMap) {
+    const mediaFile = fileMap.get("media.jpg") || fileMap.get("media.png");
+    if (scene.mediaType === "image" && mediaFile) {
+      setStatus("Loading image...");
+      const blob = new Blob([mediaFile], { type: "image/jpeg" });
+      const url = URL.createObjectURL(blob);
+      loadedImage = new Image();
+      await new Promise((resolve) => { loadedImage.onload = resolve; loadedImage.src = url; });
+      URL.revokeObjectURL(url);
+    } else if (scene.mediaType === "video") {
+      const frameCount = scene.frameCount || 0;
+      for (let i = 0; i < frameCount; i++) {
+        const pad = String(i).padStart(5, "0");
+        const data = fileMap.get(`frames/${pad}.jpg`) || fileMap.get(`frames/${pad}.png`);
+        if (!data) break;
+        if (i % 10 === 0) {
+          setStatus(`Loading frames (${i}/${frameCount})...`);
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        // Store as JPEG blobs directly — no need to decode to ImageBitmap
+        frames.push(new Blob([data], { type: "image/jpeg" }));
+      }
+    }
+  }
+
+  // Clamp in/out points to frame range
+  if (frames.length > 0) {
+    inPoint = Math.max(0, Math.min(inPoint, frames.length - 1));
+    outPoint = Math.max(inPoint, Math.min(outPoint, frames.length - 1));
+  }
+
+  // Restore controllers and ports
+  const portDataList = [];
+  for (const ctrl of scene.controllers) {
+    const ci = controllers.length;
+    controllers.push({ ports: [], collapsed: ctrl.collapsed ?? false });
+
+    for (const portData of ctrl.ports) {
+      const port = {
+        leds: portData.leds ?? 400,
+        trimStart: portData.trimStart ?? 0,
+        trimEnd: portData.trimEnd ?? 0,
+        points: (portData.points || []).map((p) => ({ x: p.x, y: p.y })),
+        collapsed: portData.collapsed ?? false,
+        previewCollapsed: portData.previewCollapsed ?? true,
+        editMode: portData.editMode ?? "points",
+        savedPoints: null,
+        transformState: null,
+      };
+      controllers[ci].ports.push(port);
+      portDirty.add(port);
+      portDataList.push(portData);
+    }
+  }
+
+  rebuildPortsList();
+
+  // Restore preview canvases from PNGs
+  if (fileMap) {
+    for (let i = 0; i < ports.length; i++) {
+      const pd = portDataList[i];
+      if (!pd.previewFile || !fileMap.has(pd.previewFile)) continue;
+
+      const pngData = fileMap.get(pd.previewFile);
+      const blob = new Blob([pngData], { type: "image/png" });
+      const bmp = await createImageBitmap(blob);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      canvas.getContext("2d").drawImage(bmp, 0, 0);
+      bmp.close();
+
+      const meta = pd.previewMeta || {};
+      canvas._totalFrames = meta.totalFrames || canvas.height;
+      canvas._fps = meta.fps || 30;
+      canvas._leds = meta.leds || canvas.width;
+
+      portPreviewCanvases.set(ports[i], canvas);
+      portDirty.delete(ports[i]);
+    }
+  }
+
+  renderPorts();
+  drawOverlay();
+  updateLinePreviews();
+  renderOutputSection();
+}
+
+function loadScene() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip,.js";
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+
+    try {
+      if (file.name.endsWith(".js") || file.name.endsWith(".json") || file.name.endsWith(".txt")) {
+        const text = await file.text();
+        await deserializeScene(text, null);
+      } else {
+        setStatus("Loading scene...");
+        const buffer = await file.arrayBuffer();
+        const entries = parseZip(buffer);
+
+        const sceneEntry = entries.find((e) => e.name === "scene.js");
+        if (!sceneEntry) throw new Error("No scene.js found in archive");
+
+        const fileMap = new Map();
+        for (const e of entries) {
+          if (e.name !== "scene.js") fileMap.set(e.name, e.data);
+        }
+
+        const text = new TextDecoder().decode(sceneEntry.data);
+        await deserializeScene(text, fileMap);
+      }
+      setStatus(`Scene loaded from ${file.name}`);
+    } catch (e) {
+      setStatus(`Failed to load scene: ${e.message}`);
+    }
+  });
+  input.click();
 }
 
 // ------------------------------------------------------------------ //
