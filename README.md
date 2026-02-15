@@ -8,7 +8,7 @@ The H803TC is an offline/online master LED controller that reads `.dat` files fr
 
 This project provides:
 
-1. **A browser-based video-to-DAT converter** — upload a video, pick a sample line, download a `.dat` file. No install needed, works on phone.
+1. **A browser-based video/image-to-DAT converter** — upload a video or image, define LED strip paths with polylines, render previews, download a `.dat` file. No install needed, works on phone.
 2. **Python and JavaScript libraries** for generating `.dat` files programmatically.
 
 ### Supported hardware
@@ -22,9 +22,9 @@ This project provides:
 
 ---
 
-## Web App — Video to DAT
+## Web App — Video/Image to DAT
 
-The quickest way to create a `.dat` file. Runs entirely in the browser with zero dependencies.
+The quickest way to create a `.dat` file. Runs entirely in the browser with zero dependencies — pure ES modules, no build system.
 
 ### How to run
 
@@ -36,32 +36,54 @@ This starts a local web server and opens the app in your browser at `http://loca
 
 ### How to use
 
-1. **Load a video** — Click "Choose File" and select a video from your device.
+1. **Load media** — Click "Choose File" and select a video or image from your device.
 
-2. **Position the sample line** — The video appears with default A/B points. Adjust the **Point A** (x, y) and **Point B** (x, y) inputs to place a line across the area of the video you want to map to your LED strip. A coloured overlay shows the line on the video.
+2. **Set up controllers & ports** — Click **+ Add Controller** to add a controller. Each controller has ports (up to 8). Each port represents one LED strip with a configurable LED count.
 
-3. **Set LED count** — Enter the number of LEDs in your strip in the **LEDs** field (default: 400). This controls how many pixels are sampled along the line.
+3. **Define LED strip paths** — Each port has a polyline (A, B, C... points) that defines where pixels are sampled from the media. In the rack sidebar:
+   - Adjust point coordinates directly in the number inputs
+   - Click **+ Point** to add more points to the polyline
+   - Set the **LEDs** count and **Trim start/end** values per port
 
-4. **Process** — Click **Process Video**. The frame rate is auto-detected from the video. Every frame is extracted and sampled along the A→B line. A preview image builds up below (one row per frame, one column per LED). Playback speed is controlled on the H803TC itself.
+4. **Multi-select & transform** — Select points across multiple ports for batch operations:
+   - **Click** a point to select it, **Shift+click** to add to selection
+   - **Select All** button on port or controller headers
+   - **Double-click** on the viewport to select the closest point
+   - Use the **Transform** toolbar below the viewport to offset, rotate, and scale selected points together
 
-5. **Download** — Once processing is complete:
-   - Click **Download .dat** to get the binary file for your H803TC SD card.
-   - Click **Download .txt** to get a human-readable summary of universes and frame count.
+5. **Render previews** — Click **Render** on a port to generate its LED preview (one row per frame, one column per LED).
 
-6. **Copy to SD card** — Put the `.dat` file on a FAT32-formatted SD card and insert it into your H803TC controller.
+6. **Set in/out points** — For video, use the playback controls to set the frame range for export.
+
+7. **Export** — Click **Export .dat** to download the binary file for your controller's SD card.
+
+8. **Save/Load** — Save and restore entire scenes (media + all port configurations) as `.zip` files.
+
+### Architecture
+
+The web app is organized into modular ES modules:
+
+- **Rack sidebar** (left panel) — controller/port hierarchy, per-port point editing (Points tool), coordinate save/load (Save/Load tool), LED count, trim, render previews
+- **Viewport** (right panel) — media display with overlay canvas, pan/zoom, polyline visualization
+- **Transform toolbar** (below viewport) — operates on multi-selected points across ports/controllers with offset, pivot, rotate, and scale controls
 
 ### Hosting on ESP32
 
 The web app is pure static files with zero external dependencies. To serve it from an ESP32:
 
-1. Copy these files to the ESP32 filesystem (SPIFFS/LittleFS):
+1. Copy these files/folders to the ESP32 filesystem (SPIFFS/LittleFS):
    - `web/index.html`
    - `web/app.js`
    - `web/style.css`
+   - `web/core/` — `state.js`, `events.js`, `utils.js`
+   - `web/player/` — `player.js`, `viewport.js`
+   - `web/rack/` — `rack.js`, `port-model.js`, `selection.js`
+   - `web/renderer/` — `sampling.js`
+   - `web/tools/` — `toolbar.js`, `points/tool.js`, `saveload/tool.js`, `transform/tool.js`
+   - `web/scene/` — `save.js`, `load.js`
+   - `web/output/` — `export.js`
    - `js/datfile.js`
 2. Serve them with any ESP32 HTTP server library, keeping the same directory structure.
-
-Total size is ~5KB.
 
 ---
 
@@ -161,19 +183,46 @@ Each frame is individually padded to the next 512-byte boundary.
 ```
 Le-Dat-Converter/
   web/
-    index.html          # browser app — video to DAT converter
-    app.js              # app logic
-    style.css           # styling
+    index.html              # entry point
+    app.js                  # bootstrap: imports modules, wires state & actions
+    style.css               # all styling
+    core/
+      state.js              # central state store
+      events.js             # event bus
+      utils.js              # zip, crc32, download helpers
+    player/
+      player.js             # playback: play/pause/stop/seek, frame extraction
+      viewport.js           # overlay canvas, pan/zoom, coordinate transforms
+    rack/
+      rack.js               # controller/port sidebar UI
+      port-model.js         # port/controller CRUD + data structures
+      selection.js          # (reserved for future selection logic)
+    renderer/
+      sampling.js           # samplePolyline, samplePortLine math
+    tools/
+      toolbar.js            # Transform toolbar UI (below viewport)
+      points/
+        tool.js             # point editing panel (per-port in rack sidebar)
+        howto.md
+      saveload/
+        tool.js             # copy/paste normalized coordinates (per-port)
+        howto.md
+      transform/
+        tool.js             # (legacy per-port transform, superseded by toolbar.js)
+        howto.md
+    scene/
+      save.js               # serialize scene + zip
+      load.js               # parse zip + deserialize scene
+    output/
+      export.js             # build DATFile from rendered previews
   js/
-    datfile.js          # JavaScript DATFile class (ES module)
+    datfile.js              # JavaScript DATFile class (ES module)
   ledat/
     __init__.py
-    datfile.py          # Python DATFile class
+    datfile.py              # Python DATFile class
   examples/
-    demo.py             # Python usage example
-  milestones/
-    v0.1.md             # roadmap
-  start_server.py       # local dev server
+    demo.py                 # Python usage example
+  start_server.py           # local dev server
   pyproject.toml
   README.md
 ```

@@ -531,6 +531,49 @@ button:disabled {
   margin: 8px 0 4px 12px;
 }
 
+/* -- toolbar -- */
+
+#toolbar {
+  margin-top: 8px;
+}
+
+.toolbar-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #16213e;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid #2a2a4a;
+  border-bottom: none;
+}
+
+.toolbar-label {
+  font-size: 0.8rem;
+  color: #888;
+  white-space: nowrap;
+}
+
+.toolbar-panel {
+  padding: 8px 10px;
+  background: #1a1a2e;
+  border-radius: 0 0 6px 6px;
+  border: 1px solid #2a2a4a;
+  border-top: none;
+  min-height: 40px;
+}
+
+.toolbar-hint {
+  font-size: 0.8rem;
+  color: #666;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.port.port-selected {
+  border-color: #e94560;
+}
+
 /* -- scrollbar styling for panels -- */
 
 .panel-ports::-webkit-scrollbar,

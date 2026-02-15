@@ -1,4 +1,19 @@
-import { DATFile } from "../js/datfile.js";
+import { samplePolyline as _samplePolyline, samplePortLine as _samplePortLine } from "./renderer/sampling.js";
+import { state } from "./core/state.js";
+import { bus } from "./core/events.js";
+import * as player from "./player/player.js";
+import * as viewport from "./player/viewport.js";
+import * as rack from "./rack/rack.js";
+import * as toolbar from "./tools/toolbar.js";
+import { saveScene as _saveScene } from "./scene/save.js";
+import { loadScene as _loadScene } from "./scene/load.js";
+import { doExport as _doExport } from "./output/export.js";
+import {
+  rebuildPortsList as _rebuildPorts, createController, createPort,
+  firstFlatIndex, addPointToPort as _addPoint, removePointFromPort as _removePoint,
+  enterTransformMode as _enterTransform, applyTransform as _applyTransform,
+  cancelTransform as _cancelTransform, computeTransformedPoints, getTransformControlPoints,
+} from "./rack/port-model.js";
 
 // ------------------------------------------------------------------ //
 // DOM refs
@@ -16,15 +31,13 @@ const overlayCtx = overlay.getContext("2d");
 const portsList = document.getElementById("ports-list");
 const addPortBtn = document.getElementById("add-port-btn");
 const outputSection = document.getElementById("output-section");
+const toolbarEl = document.getElementById("toolbar");
 
 // ------------------------------------------------------------------ //
 // Constants
 // ------------------------------------------------------------------ //
 
-const PORT_COLORS = [
-  "#e94560", "#00ff88", "#00aaff", "#ffaa00",
-  "#ff66cc", "#88ff00", "#aa66ff", "#ff4400",
-];
+// PORT_COLORS now lives in rack/rack.js
 
 const DRAG_INTERVAL = 20; // ~50fps throttle for drag updates
 
@@ -57,8 +70,66 @@ let frameOffset = 0;
 /** Max frame length — extract at most this many frames (0 = entire file) */
 let frameLength = 2000;
 
-/** Currently selected point: { port, point } where port is flat index, or null */
+/** Currently focused point: { port, point } where port is flat index, or null */
 let activeSelection = null;
+
+/** Multi-point selection — Set of "portIdx:pointIdx" keys */
+const selectedPoints = new Set();
+
+// Selection helpers
+function isPointSelected(pi, pti) { return selectedPoints.has(`${pi}:${pti}`); }
+
+function selectPoint(pi, pti) {
+  selectedPoints.clear();
+  selectedPoints.add(`${pi}:${pti}`);
+  activeSelection = { port: pi, point: pti };
+  toolbar.onSelectionChanged();
+}
+
+function togglePoint(pi, pti) {
+  const key = `${pi}:${pti}`;
+  if (selectedPoints.has(key)) selectedPoints.delete(key);
+  else selectedPoints.add(key);
+  activeSelection = { port: pi, point: pti };
+  toolbar.onSelectionChanged();
+}
+
+function selectAllInPort(pi) {
+  const port = ports[pi];
+  if (!port) return;
+  for (let i = 0; i < port.points.length; i++) selectedPoints.add(`${pi}:${i}`);
+  if (port.points.length > 0) activeSelection = { port: pi, point: 0 };
+  toolbar.onSelectionChanged();
+}
+
+function selectAllInController(ci) {
+  const ctrl = controllers[ci];
+  if (!ctrl) return;
+  let flatIdx = firstFlatIndex(controllers, ci);
+  for (const port of ctrl.ports) {
+    for (let i = 0; i < port.points.length; i++) selectedPoints.add(`${flatIdx}:${i}`);
+    flatIdx++;
+  }
+  toolbar.onSelectionChanged();
+}
+
+function clearSelection() {
+  selectedPoints.clear();
+  activeSelection = null;
+  toolbar.onSelectionChanged();
+}
+
+/** Get all selected points as objects */
+function getSelectedPointObjects() {
+  const result = [];
+  for (const key of selectedPoints) {
+    const [pi, pti] = key.split(":").map(Number);
+    if (ports[pi] && ports[pi].points[pti]) {
+      result.push({ portIdx: pi, pointIdx: pti, point: ports[pi].points[pti] });
+    }
+  }
+  return result;
+}
 
 let mediaReady = false;
 let mediaType = ""; // "video" or "image"
@@ -89,26 +160,10 @@ let isPlaying = false;
 /** @type {Blob[]} All video frames stored as JPEG blobs */
 let frames = [];
 let currentFrameIdx = 0;
-let playbackTimerId = null;
 
-/** Decoded frame cache — avoids re-decoding the current frame on every draw */
-let decodedFrame = null; // { idx: number, bmp: ImageBitmap }
-
-async function ensureFrameDecoded(idx) {
-  if (decodedFrame && decodedFrame.idx === idx) return decodedFrame.bmp;
-  if (decodedFrame) { decodedFrame.bmp.close(); decodedFrame = null; }
-  const bmp = await createImageBitmap(frames[idx]);
-  decodedFrame = { idx, bmp };
-  return bmp;
-}
-
-function getDecodedFrame() {
-  return decodedFrame ? decodedFrame.bmp : null;
-}
-
-function clearDecodedFrame() {
-  if (decodedFrame) { decodedFrame.bmp.close(); decodedFrame = null; }
-}
+// Frame decode cache delegated to player module
+const ensureFrameDecoded = player.ensureFrameDecoded;
+const clearDecodedFrame = player.clearDecodedFrame;
 
 // In/out points (frame indices, inclusive)
 let inPoint = 0;
@@ -149,95 +204,91 @@ fetch("prototype.dat")
   .catch(() => {});
 
 // ------------------------------------------------------------------ //
-// Frame-based playback (no video seeking — uses pre-extracted frames)
+// Frame-based playback (delegates to player/player.js)
 // ------------------------------------------------------------------ //
 
-function updatePlaybackUI() {
-  const seekBar = document.getElementById("seek-bar");
-  const frameLabel = document.getElementById("frame-label");
-  if (!seekBar || !frameLabel) return;
-  if (document.activeElement !== seekBar) {
-    seekBar.value = String(currentFrameIdx);
-  }
-  const fps = detectedFPS || 30;
-  const t = currentFrameIdx / fps;
-  frameLabel.textContent = `${currentFrameIdx} / ${frames.length}  (${t.toFixed(2)}s)`;
-}
+// Shared state object — player reads/writes through these accessors
+const playerState = {
+  get frames() { return frames; },
+  get currentFrame() { return currentFrameIdx; },
+  set currentFrame(v) { currentFrameIdx = v; },
+  get isPlaying() { return isPlaying; },
+  set isPlaying(v) { isPlaying = v; },
+  get fps() { return detectedFPS || 30; },
+  get inPoint() { return inPoint; },
+  get outPoint() { return outPoint; },
+};
 
-async function doPlay() {
-  if (frames.length === 0) return;
-  if (isPlaying) return;
-  // Jump to inPoint if current position is outside the in/out range
-  if (currentFrameIdx < inPoint || currentFrameIdx >= outPoint) {
-    currentFrameIdx = inPoint;
-    await drawOverlay();
-  }
-  isPlaying = true;
-  renderOutputSection();
-  const fps = detectedFPS || 30;
-  const interval = 1000 / fps;
-  let lastTime = performance.now();
-  let decoding = false;
+viewport.init(overlay, videoWrap);
+viewport.setOnChange(() => drawOverlay());
+viewport.setKeyboardCallbacks({
+  stepForward: () => player.stepForward(),
+  stepBack: () => player.stepBack(),
+});
 
-  function step(now) {
-    if (!isPlaying) return;
-    if (decoding) { playbackTimerId = requestAnimationFrame(step); return; }
-    if (now - lastTime >= interval) {
-      lastTime += interval;
-      currentFrameIdx++;
-      if (currentFrameIdx > outPoint) {
-        currentFrameIdx = outPoint;
-        doPause();
-        return;
-      }
-      decoding = true;
-      ensureFrameDecoded(currentFrameIdx).then((bmp) => {
-        decoding = false;
-        if (!isPlaying) return;
-        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-        overlayCtx.drawImage(bmp, 0, 0);
-        // Redraw port overlays on top
-        drawOverlayPorts();
-        updatePlaybackUI();
-      });
-    }
-    playbackTimerId = requestAnimationFrame(step);
-  }
-  playbackTimerId = requestAnimationFrame(step);
-}
+player.init(playerState, {
+  drawOverlay: () => drawOverlay(),
+  drawFast: (bmp) => {
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    viewport.applyTransform(overlayCtx);
+    overlayCtx.drawImage(bmp, 0, 0);
+    drawOverlayPorts();
+    viewport.restoreTransform(overlayCtx);
+  },
+  onFrameChanged: () => updateLinePreviews(),
+  onPlayStateChanged: () => renderOutputSection(),
+});
 
-function doPause() {
-  if (!isPlaying && !playbackTimerId) return;
-  isPlaying = false;
-  if (playbackTimerId) {
-    cancelAnimationFrame(playbackTimerId);
-    playbackTimerId = null;
-  }
-  renderOutputSection();
-  updateLinePreviews();
-}
+rack.init(portsList, addPortBtn, {
+  get controllers() { return controllers; },
+  get ports() { return ports; },
+  get activeSelection() { return activeSelection; },
+  get selectedPoints() { return selectedPoints; },
+  isPointSelected,
+  get portDirty() { return portDirty; },
+  get portPreviewCanvases() { return portPreviewCanvases; },
+  get portPreviewProcessing() { return portPreviewProcessing; },
+  get mediaW() { return mediaW; },
+  get mediaH() { return mediaH; },
+  get mediaReady() { return mediaReady; },
+  get portsPerController() { return portsPerController; },
+}, {
+  addController,
+  removeController,
+  addPort,
+  removePort,
+  addPointToPort,
+  removePointFromPort,
+  selectPoint,
+  togglePoint,
+  selectAllInPort,
+  selectAllInController,
+  processPortPreview,
+  markPortDirty,
+  drawOverlay: () => drawOverlay(),
+  updateLinePreviews: () => updateLinePreviews(),
+});
 
-async function doStop() {
-  isPlaying = false;
-  if (playbackTimerId) {
-    cancelAnimationFrame(playbackTimerId);
-    playbackTimerId = null;
-  }
-  currentFrameIdx = 0;
-  await drawOverlay();
-  updatePlaybackUI();
-  await updateLinePreviews();
-  renderOutputSection();
-}
+toolbar.init(toolbarEl, {
+  get activeSelection() { return activeSelection; },
+  get selectedPoints() { return selectedPoints; },
+  get ports() { return ports; },
+  get mediaW() { return mediaW; },
+  get mediaH() { return mediaH; },
+  isPointSelected,
+  getSelectedPointObjects,
+}, {
+  markPortDirty,
+  markAllPortsDirty,
+  drawOverlay: () => drawOverlay(),
+  updateLinePreviews: () => updateLinePreviews(),
+  renderRack: () => renderPorts(),
+});
 
-async function doSeek(frameIdx) {
-  if (frames.length === 0) return;
-  if (isPlaying) doPause();
-  currentFrameIdx = Math.max(0, Math.min(frames.length - 1, frameIdx));
-  await drawOverlay();
-  updatePlaybackUI();
-  await updateLinePreviews();
-}
+function doPlay() { return player.play(); }
+function doPause() { player.pause(); }
+function doStop() { return player.stop(); }
+function doSeek(frameIdx) { return player.seek(frameIdx); }
 
 /** Compute downscaled dimensions so the longer side fits maxResolution */
 function clampResolution(w, h) {
@@ -254,6 +305,9 @@ function initAfterLoad(w, h) {
 
   overlay.width = w;
   overlay.height = h;
+
+  viewport.setMediaSize(w, h);
+  viewport.resetView();
 
   // Prepare offscreen canvas for live sampling
   sampleCanvas = document.createElement("canvas");
@@ -423,26 +477,22 @@ async function extractFrames() {
 }
 
 // ------------------------------------------------------------------ //
-// Port / point data model
+// Port / point data model (delegates to rack/port-model.js)
 // ------------------------------------------------------------------ //
 
-/** Rebuild the flat `ports` array from `controllers`. Call after any structural change. */
 function rebuildPortsList() {
-  ports = controllers.flatMap((c) => c.ports);
+  ports = _rebuildPorts(controllers);
 }
 
 function addController() {
-  controllers.push({ ports: [], collapsed: false });
+  controllers.push(createController());
 }
 
 function removeController(ci) {
   const ctrl = controllers[ci];
-  // Compute flat index of first port in this controller
-  let firstFlat = 0;
-  for (let i = 0; i < ci; i++) firstFlat += controllers[i].ports.length;
+  const firstFlat = firstFlatIndex(controllers, ci);
   const count = ctrl.ports.length;
 
-  // Clean up all ports
   for (const port of ctrl.ports) {
     portDirty.delete(port);
     portPreviewCanvases.delete(port);
@@ -452,7 +502,6 @@ function removeController(ci) {
   controllers.splice(ci, 1);
   rebuildPortsList();
 
-  // Adjust active selection
   if (activeSelection) {
     if (activeSelection.port >= firstFlat && activeSelection.port < firstFlat + count) {
       activeSelection = null;
@@ -460,32 +509,24 @@ function removeController(ci) {
       activeSelection.port -= count;
     }
   }
+  toolbar.onSelectionChanged();
 }
 
 function addPort(ci, leds = 400, points = null) {
-  if (!points) {
-    const cx = mediaReady ? Math.round(mediaW / 2) : 200;
-    const cy = mediaReady ? Math.round(mediaH / 2) : 200;
-    points = [
-      { x: cx - 100, y: cy },
-      { x: cx + 100, y: cy },
-    ];
-  }
-  const port = { leds, points, collapsed: false, previewCollapsed: true, editMode: "points", savedPoints: null, transformState: null, trimStart: 0, trimEnd: 0 };
+  const mw = mediaReady ? mediaW : 400;
+  const mh = mediaReady ? mediaH : 400;
+  const port = createPort(leds, points, mw, mh);
   controllers[ci].ports.push(port);
   rebuildPortsList();
   portDirty.add(port);
   activeSelection = { port: ports.indexOf(port), point: 0 };
+  toolbar.onSelectionChanged();
 }
 
 function removePort(ci, pi) {
   const ctrl = controllers[ci];
   const port = ctrl.ports[pi];
-
-  // Compute flat index before removal
-  let flatIdx = 0;
-  for (let i = 0; i < ci; i++) flatIdx += controllers[i].ports.length;
-  flatIdx += pi;
+  const flatIdx = firstFlatIndex(controllers, ci) + pi;
 
   portDirty.delete(port);
   portPreviewCanvases.delete(port);
@@ -499,18 +540,17 @@ function removePort(ci, pi) {
   } else if (activeSelection && activeSelection.port > flatIdx) {
     activeSelection.port--;
   }
+  toolbar.onSelectionChanged();
 }
 
 function addPointToPort(portIdx) {
-  const pts = ports[portIdx].points;
-  const last = pts[pts.length - 1];
-  pts.push({ x: last.x + 30, y: last.y });
-  activeSelection = { port: portIdx, point: pts.length - 1 };
+  const newIdx = _addPoint(ports[portIdx]);
+  activeSelection = { port: portIdx, point: newIdx };
+  toolbar.renderPanel();
 }
 
 function removePointFromPort(portIdx, pointIdx) {
-  if (ports[portIdx].points.length <= 2) return;
-  ports[portIdx].points.splice(pointIdx, 1);
+  if (!_removePoint(ports[portIdx], pointIdx)) return;
   if (activeSelection &&
       activeSelection.port === portIdx &&
       activeSelection.point === pointIdx) {
@@ -520,117 +560,13 @@ function removePointFromPort(portIdx, pointIdx) {
              activeSelection.point > pointIdx) {
     activeSelection.point--;
   }
+  toolbar.renderPanel();
 }
 
-// ------------------------------------------------------------------ //
-// Transform mode
-// ------------------------------------------------------------------ //
-
-function enterTransformMode(port) {
-  port.savedPoints = port.points.map((p) => ({ x: p.x, y: p.y }));
-
-  // Compute centroid
-  let cx = 0, cy = 0;
-  for (const p of port.points) { cx += p.x; cy += p.y; }
-  cx /= port.points.length;
-  cy /= port.points.length;
-
-  // Compute baseRadius from max distance of points to centroid (min 50)
-  // Clamp so scale handles (at half radius) stay within the frame
-  let maxDist = 0;
-  for (const p of port.points) {
-    const d = Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
-    if (d > maxDist) maxDist = d;
-  }
-  const maxAllowed = Math.min(cx, cy, mediaW - cx, mediaH - cy) * 2; // *2 because handles use half
-  const baseRadius = Math.max(50, Math.min(maxDist, maxAllowed));
-
-  port.transformState = {
-    center: { x: Math.round(cx), y: Math.round(cy) },
-    offset: { x: 0, y: 0 },
-    pivot: { x: 0, y: 0 },
-    angle: 0,
-    scaleX: 1,
-    scaleY: 1,
-    baseRadius,
-  };
-  port.editMode = "transform";
-}
-
-function applyTransform(port) {
-  if (!port.transformState || !port.savedPoints) return;
-  port.points = computeTransformedPoints(port.savedPoints, port.transformState);
-  port.editMode = "points";
-  port.savedPoints = null;
-  port.transformState = null;
-  markPortDirty(port);
-}
-
-function cancelTransform(port) {
-  if (port.savedPoints) {
-    port.points = port.savedPoints;
-  }
-  port.editMode = "points";
-  port.savedPoints = null;
-  port.transformState = null;
-}
-
-/** Apply Scale → Rotate → Translate. Effective pivot = center + pivot. Offset moves everything. */
-function computeTransformedPoints(savedPoints, state) {
-  const { center, pivot, offset, angle, scaleX, scaleY } = state;
-  const epx = center.x + pivot.x; // effective pivot in original space
-  const epy = center.y + pivot.y;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  return savedPoints.map((p) => {
-    const rx = (p.x - epx) * scaleX;
-    const ry = (p.y - epy) * scaleY;
-    const rotX = rx * cos - ry * sin;
-    const rotY = rx * sin + ry * cos;
-    return {
-      x: Math.round(rotX + epx + offset.x),
-      y: Math.round(rotY + epy + offset.y),
-    };
-  });
-}
-
-/** Get all draggable control points (always returns every handle) */
-function getTransformControlPoints(port) {
-  const s = port.transformState;
-  if (!s) return [];
-  const sr = s.baseRadius / 2;
-  // Widget center (offset handle) in world space
-  const wx = s.center.x + s.offset.x;
-  const wy = s.center.y + s.offset.y;
-  // Effective pivot in world space
-  const px = wx + s.pivot.x;
-  const py = wy + s.pivot.y;
-
-  return [
-    { key: "offset", x: wx, y: wy },
-    { key: "pivot",  x: px, y: py },
-    { key: "rotate", x: px + s.baseRadius * Math.cos(s.angle), y: py + s.baseRadius * Math.sin(s.angle) },
-    { key: "scaleX", x: px + sr * s.scaleX, y: py },
-    { key: "scaleY", x: px, y: py + sr * s.scaleY },
-  ];
-}
-
-/** Parse tab-separated normalized coordinates back to pixel points */
-function parseSaveLoadText(text, w, h) {
-  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
-  const points = [];
-  for (const line of lines) {
-    const parts = line.split(/\t|,|\s+/).map(Number);
-    if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      points.push({
-        x: Math.round(parts[0] * w),
-        y: Math.round(parts[1] * h),
-      });
-    }
-  }
-  return points;
-}
+// Transform mode (delegates to rack/port-model.js)
+function enterTransformMode(port) { _enterTransform(port, mediaW, mediaH); }
+function applyTransform(port) { _applyTransform(port); markPortDirty(port); }
+function cancelTransform(port) { _cancelTransform(port); }
 
 // ------------------------------------------------------------------ //
 // Output section UI (foldable card)
@@ -1041,561 +977,7 @@ renderOutputSection();
 // Ports UI rendering
 // ------------------------------------------------------------------ //
 
-/** Per-port line preview canvases, keyed by port index */
-const linePreviewCanvases = new Map();
-
-function renderPorts() {
-  portsList.innerHTML = "";
-  linePreviewCanvases.clear();
-
-  let flatIdx = 0;
-
-  controllers.forEach((ctrl, ci) => {
-    const group = document.createElement("div");
-    group.className = "controller-group";
-
-    // Controller header
-    const ctrlHeader = document.createElement("div");
-    ctrlHeader.className = "controller-header";
-
-    const ctrlToggle = document.createElement("button");
-    ctrlToggle.className = "btn-toggle";
-    ctrlToggle.textContent = ctrl.collapsed ? "\u25b6" : "\u25bc";
-    ctrlToggle.addEventListener("click", () => {
-      ctrl.collapsed = !ctrl.collapsed;
-      renderPorts();
-    });
-
-    const ctrlLabel = document.createElement("span");
-    ctrlLabel.className = "port-label";
-    ctrlLabel.textContent = `Controller ${ci}`;
-
-    const ctrlPortCount = document.createElement("span");
-    ctrlPortCount.style.cssText = "font-size:0.75rem;color:#888";
-    ctrlPortCount.textContent = `(${ctrl.ports.length} port${ctrl.ports.length !== 1 ? "s" : ""})`;
-
-    const ctrlRemoveBtn = document.createElement("button");
-    ctrlRemoveBtn.className = "btn-danger";
-    ctrlRemoveBtn.textContent = "Remove";
-    ctrlRemoveBtn.addEventListener("click", () => {
-      removeController(ci);
-      renderPorts();
-      drawOverlay();
-    });
-
-    ctrlHeader.append(ctrlToggle, ctrlLabel, ctrlPortCount, ctrlRemoveBtn);
-    group.appendChild(ctrlHeader);
-
-    if (ctrl.collapsed) {
-      // Skip rendering ports, just count flat indices
-      flatIdx += ctrl.ports.length;
-      portsList.appendChild(group);
-      return; // continue to next controller
-    }
-
-    // Ports within this controller
-    ctrl.ports.forEach((port, pi) => {
-      const globalIdx = flatIdx;
-      const color = PORT_COLORS[globalIdx % PORT_COLORS.length];
-      const isCollapsed = port.collapsed;
-
-      const div = document.createElement("div");
-      div.className = "port";
-
-      // Header row
-      const header = document.createElement("div");
-      header.className = "port-header";
-
-      const toggle = document.createElement("button");
-      toggle.className = "btn-toggle";
-      toggle.textContent = isCollapsed ? "\u25b6" : "\u25bc";
-      toggle.addEventListener("click", () => {
-        port.collapsed = !port.collapsed;
-        renderPorts();
-      });
-
-      const dot = document.createElement("span");
-      dot.className = "color-dot";
-      dot.style.background = color;
-
-      const label = document.createElement("span");
-      label.className = "port-label";
-      label.textContent = `Port ${pi}`;
-
-      const ledsLabel = document.createElement("label");
-      ledsLabel.textContent = "LEDs";
-
-      const ledsInput = document.createElement("input");
-      ledsInput.type = "number";
-      ledsInput.min = "1";
-      ledsInput.max = "400";
-      ledsInput.value = port.leds;
-      ledsInput.addEventListener("change", () => {
-        port.leds = Math.max(1, Math.min(400, parseInt(ledsInput.value) || 1));
-        ledsInput.value = port.leds;
-        updateLinePreviews();
-        markPortDirty(port);
-      });
-
-      const removeBtn = document.createElement("button");
-      removeBtn.className = "btn-danger";
-      removeBtn.textContent = "\u00d7";
-      removeBtn.addEventListener("click", () => {
-        removePort(ci, pi);
-        renderPorts();
-        drawOverlay();
-      });
-
-      const isDirty = portDirty.has(port);
-      const isProcessing = portPreviewProcessing.has(port);
-      const progress = portPreviewProcessing.get(port);
-
-      const renderBtn = document.createElement("button");
-      renderBtn.className = "btn-small";
-      renderBtn.textContent = isProcessing ? `Rendering ${progress.frame}/${progress.total}` : "Render";
-      renderBtn.disabled = !isDirty || isProcessing;
-      renderBtn.addEventListener("click", () => {
-        renderBtn.textContent = "Rendering\u2026";
-        renderBtn.disabled = true;
-        processPortPreview(port);
-      });
-
-      header.append(toggle, dot, label, ledsLabel, ledsInput, renderBtn, removeBtn);
-      div.appendChild(header);
-
-      // Line preview strip (always visible)
-      const lineCanvas = document.createElement("canvas");
-      lineCanvas.className = "line-preview";
-      lineCanvas.height = 1;
-      lineCanvas.width = port.leds;
-      div.appendChild(lineCanvas);
-      linePreviewCanvases.set(globalIdx, lineCanvas);
-
-      // Per-port bitmap preview (foldable)
-      const hasPreview = portPreviewCanvases.has(port);
-      if (hasPreview || isProcessing) {
-        const prevSection = document.createElement("div");
-        prevSection.className = "port-preview-section";
-
-        const prevHeader = document.createElement("div");
-        prevHeader.className = "port-preview-header";
-
-        const prevToggle = document.createElement("button");
-        prevToggle.className = "btn-toggle";
-        prevToggle.textContent = port.previewCollapsed ? "\u25b6" : "\u25bc";
-        prevToggle.addEventListener("click", () => {
-          port.previewCollapsed = !port.previewCollapsed;
-          renderPorts();
-        });
-
-        const prevLabel = document.createElement("span");
-        prevLabel.className = "preview-label";
-        prevLabel.style.margin = "0";
-        prevLabel.textContent = "Preview";
-
-        prevHeader.append(prevToggle, prevLabel);
-
-        if (isProcessing) {
-          const status = document.createElement("span");
-          status.className = "port-preview-status";
-          status.textContent = `Rendering ${progress.frame}/${progress.total}`;
-          prevHeader.appendChild(status);
-        }
-
-        prevSection.appendChild(prevHeader);
-
-        if (!port.previewCollapsed && hasPreview) {
-          const canvas = portPreviewCanvases.get(port);
-          canvas.className = "preview-canvas";
-          const totalFrames = canvas._totalFrames || 1;
-          const fps = canvas._fps || 30;
-          const leds = canvas._leds || port.leds;
-          const totalSeconds = totalFrames / fps;
-
-          const wrapper = document.createElement("div");
-          wrapper.className = "preview-axes-wrapper";
-
-          const xAxis = document.createElement("div");
-          xAxis.className = "preview-x-axis";
-          const xStep = leds <= 100 ? 25 : leds <= 200 ? 50 : 100;
-          for (let led = 0; led <= leds; led += xStep) {
-            const tick = document.createElement("span");
-            tick.textContent = led;
-            tick.style.left = (led / leds * 100) + "%";
-            xAxis.appendChild(tick);
-          }
-
-          const yAxis = document.createElement("div");
-          yAxis.className = "preview-y-axis";
-          const yStep = totalSeconds <= 5 ? 1 : totalSeconds <= 20 ? 2 : 5;
-          for (let s = 0; s <= totalSeconds; s += yStep) {
-            const tick = document.createElement("span");
-            tick.textContent = s + "s";
-            tick.style.top = (s / totalSeconds * 100) + "%";
-            yAxis.appendChild(tick);
-          }
-
-          wrapper.append(yAxis, xAxis, canvas);
-          prevSection.appendChild(wrapper);
-        }
-
-        div.appendChild(prevSection);
-      }
-
-      // Trim + edit mode section (collapsible)
-      if (!isCollapsed) {
-        // Trim start/end
-        const trimRow = document.createElement("div");
-        trimRow.className = "point-actions";
-        trimRow.style.display = "flex";
-        trimRow.style.gap = "8px";
-        trimRow.style.alignItems = "center";
-
-        const tsLabel = document.createElement("label");
-        tsLabel.textContent = "Trim start";
-        const tsInput = document.createElement("input");
-        tsInput.type = "number";
-        tsInput.min = "0";
-        tsInput.max = String(port.leds - port.trimEnd - 2);
-        tsInput.value = String(port.trimStart);
-        tsInput.addEventListener("change", () => {
-          port.trimStart = Math.max(0, Math.min(port.leds - port.trimEnd - 2, parseInt(tsInput.value) || 0));
-          tsInput.value = port.trimStart;
-          updateLinePreviews();
-          markPortDirty(port);
-          renderPorts();
-        });
-
-        const teLabel = document.createElement("label");
-        teLabel.textContent = "end";
-        const teInput = document.createElement("input");
-        teInput.type = "number";
-        teInput.min = "0";
-        teInput.max = String(port.leds - port.trimStart - 2);
-        teInput.value = String(port.trimEnd);
-        teInput.addEventListener("change", () => {
-          port.trimEnd = Math.max(0, Math.min(port.leds - port.trimStart - 2, parseInt(teInput.value) || 0));
-          teInput.value = port.trimEnd;
-          updateLinePreviews();
-          markPortDirty(port);
-          renderPorts();
-        });
-
-        trimRow.append(tsLabel, tsInput, teLabel, teInput);
-        div.appendChild(trimRow);
-
-        // Dropdown: Points / Transform
-        const modeRow = document.createElement("div");
-        modeRow.className = "point-actions";
-        const modeSelect = document.createElement("select");
-        modeSelect.className = "edit-mode-select";
-        for (const [val, lbl] of [["points", "Points"], ["transform", "Transform"], ["saveload", "Save/Load"]]) {
-          const opt = document.createElement("option");
-          opt.value = val;
-          opt.textContent = lbl;
-          if (port.editMode === val) opt.selected = true;
-          modeSelect.appendChild(opt);
-        }
-        modeSelect.addEventListener("change", () => {
-          const prev = port.editMode;
-          const next = modeSelect.value;
-          // Leaving transform without applying = cancel
-          if (prev === "transform" && next !== "transform") {
-            cancelTransform(port);
-            activeSelection = null;
-          }
-          if (next === "transform" && prev !== "transform") {
-            enterTransformMode(port);
-            activeSelection = { port: globalIdx, control: "offset" };
-          }
-          if (next === "saveload") {
-            port.editMode = "saveload";
-          } else if (next === "points") {
-            port.editMode = "points";
-          }
-          renderPorts();
-          drawOverlay();
-        });
-        modeRow.appendChild(modeSelect);
-        div.appendChild(modeRow);
-
-        if (port.editMode === "points") {
-          // Points list
-          const pointsDiv = document.createElement("div");
-          pointsDiv.className = "points-list";
-
-          port.points.forEach((pt, pti) => {
-            const row = document.createElement("div");
-            row.className = "point-row";
-            const isActive = activeSelection &&
-                activeSelection.port === globalIdx &&
-                activeSelection.point === pti;
-            if (isActive) row.classList.add("active");
-
-            const ptLabel = document.createElement("span");
-            ptLabel.className = "point-label";
-            ptLabel.textContent = String.fromCharCode(65 + pti);
-
-            const xIn = document.createElement("input");
-            xIn.type = "number";
-            xIn.className = "coord-input";
-            xIn.value = pt.x;
-            xIn.addEventListener("change", () => {
-              pt.x = Math.max(0, Math.min(mediaW - 1, parseInt(xIn.value) || 0));
-              xIn.value = pt.x;
-              markPortDirty(port);
-              drawOverlay();
-              updateLinePreviews();
-            });
-            xIn.addEventListener("click", (e) => e.stopPropagation());
-
-            const yIn = document.createElement("input");
-            yIn.type = "number";
-            yIn.className = "coord-input";
-            yIn.value = pt.y;
-            yIn.addEventListener("change", () => {
-              pt.y = Math.max(0, Math.min(mediaH - 1, parseInt(yIn.value) || 0));
-              yIn.value = pt.y;
-              markPortDirty(port);
-              drawOverlay();
-              updateLinePreviews();
-            });
-            yIn.addEventListener("click", (e) => e.stopPropagation());
-
-            row.append(ptLabel, xIn, yIn);
-
-            if (port.points.length > 2) {
-              const rmPt = document.createElement("button");
-              rmPt.className = "btn-danger";
-              rmPt.textContent = "\u00d7";
-              rmPt.style.marginLeft = "auto";
-              rmPt.addEventListener("click", (e) => {
-                e.stopPropagation();
-                removePointFromPort(globalIdx, pti);
-                markPortDirty(port);
-                renderPorts();
-                drawOverlay();
-              });
-              row.appendChild(rmPt);
-            }
-
-            row.addEventListener("click", () => {
-              activeSelection = { port: globalIdx, point: pti };
-              renderPorts();
-              drawOverlay();
-            });
-
-            pointsDiv.appendChild(row);
-          });
-
-          div.appendChild(pointsDiv);
-
-          // Add point button
-          const actions = document.createElement("div");
-          actions.className = "point-actions";
-          const addPtBtn = document.createElement("button");
-          addPtBtn.className = "btn-small";
-          addPtBtn.textContent = "+ Point";
-          addPtBtn.addEventListener("click", () => {
-            addPointToPort(globalIdx);
-            markPortDirty(port);
-            renderPorts();
-            drawOverlay();
-          });
-          actions.appendChild(addPtBtn);
-          div.appendChild(actions);
-        } else if (port.editMode === "transform") {
-          // Transform mode UI — list controls like point rows
-          const s = port.transformState;
-          const controlsList = document.createElement("div");
-          controlsList.className = "points-list";
-
-          /** Helper: create a control row with editable input(s) */
-          function makeControlRow(key, label, inputs) {
-            const row = document.createElement("div");
-            row.className = "point-row";
-            if (activeSelection &&
-                activeSelection.port === globalIdx &&
-                "control" in activeSelection &&
-                activeSelection.control === key) {
-              row.classList.add("active");
-            }
-            const lbl = document.createElement("span");
-            lbl.className = "point-label";
-            lbl.textContent = label;
-            row.append(lbl, ...inputs);
-            row.addEventListener("click", () => {
-              activeSelection = { port: globalIdx, control: key };
-              renderPorts();
-              drawOverlay();
-            });
-            return row;
-          }
-
-          function applyTransformInputs() {
-            port.points = computeTransformedPoints(port.savedPoints, s);
-            drawOverlay();
-            updateLinePreviews();
-          }
-
-          if (s) {
-            // Offset (x, y) — primary: moves the whole widget
-            const ofX = document.createElement("input");
-            ofX.type = "number"; ofX.className = "coord-input"; ofX.value = Math.round(s.offset.x);
-            ofX.addEventListener("click", (e) => e.stopPropagation());
-            ofX.addEventListener("change", () => { s.offset.x = parseInt(ofX.value) || 0; applyTransformInputs(); });
-            const ofY = document.createElement("input");
-            ofY.type = "number"; ofY.className = "coord-input"; ofY.value = Math.round(s.offset.y);
-            ofY.addEventListener("click", (e) => e.stopPropagation());
-            ofY.addEventListener("change", () => { s.offset.y = parseInt(ofY.value) || 0; applyTransformInputs(); });
-            controlsList.appendChild(makeControlRow("offset", "Offset", [ofX, ofY]));
-
-            // Pivot (x, y) — relative to offset, adjusts rotation/scale center
-            const pvX = document.createElement("input");
-            pvX.type = "number"; pvX.className = "coord-input"; pvX.value = Math.round(s.pivot.x);
-            pvX.addEventListener("click", (e) => e.stopPropagation());
-            pvX.addEventListener("change", () => { s.pivot.x = parseInt(pvX.value) || 0; applyTransformInputs(); });
-            const pvY = document.createElement("input");
-            pvY.type = "number"; pvY.className = "coord-input"; pvY.value = Math.round(s.pivot.y);
-            pvY.addEventListener("click", (e) => e.stopPropagation());
-            pvY.addEventListener("change", () => { s.pivot.y = parseInt(pvY.value) || 0; applyTransformInputs(); });
-            controlsList.appendChild(makeControlRow("pivot", "Pivot", [pvX, pvY]));
-
-            // Rotate (degrees)
-            const rotIn = document.createElement("input");
-            rotIn.type = "number"; rotIn.className = "coord-input"; rotIn.step = "0.1";
-            rotIn.value = (s.angle * 180 / Math.PI).toFixed(1);
-            rotIn.addEventListener("click", (e) => e.stopPropagation());
-            rotIn.addEventListener("change", () => { s.angle = (parseFloat(rotIn.value) || 0) * Math.PI / 180; applyTransformInputs(); });
-            const degLabel = document.createElement("span");
-            degLabel.className = "coords";
-            degLabel.textContent = "\u00b0";
-            controlsList.appendChild(makeControlRow("rotate", "Rotate", [rotIn, degLabel]));
-
-            // ScaleX
-            const sxIn = document.createElement("input");
-            sxIn.type = "number"; sxIn.className = "coord-input"; sxIn.step = "0.01";
-            sxIn.value = s.scaleX.toFixed(2);
-            sxIn.addEventListener("click", (e) => e.stopPropagation());
-            sxIn.addEventListener("change", () => { s.scaleX = parseFloat(sxIn.value) || 1; applyTransformInputs(); });
-            controlsList.appendChild(makeControlRow("scaleX", "ScaleX", [sxIn]));
-
-            // ScaleY
-            const syIn = document.createElement("input");
-            syIn.type = "number"; syIn.className = "coord-input"; syIn.step = "0.01";
-            syIn.value = s.scaleY.toFixed(2);
-            syIn.addEventListener("click", (e) => e.stopPropagation());
-            syIn.addEventListener("change", () => { s.scaleY = parseFloat(syIn.value) || 1; applyTransformInputs(); });
-            controlsList.appendChild(makeControlRow("scaleY", "ScaleY", [syIn]));
-          }
-
-          div.appendChild(controlsList);
-
-          // Apply / Cancel
-          const actionsRow = document.createElement("div");
-          actionsRow.className = "transform-actions";
-          const applyBtn = document.createElement("button");
-          applyBtn.className = "btn-small btn-primary";
-          applyBtn.textContent = "Apply";
-          applyBtn.addEventListener("click", () => {
-            applyTransform(port);
-            activeSelection = null;
-            renderPorts();
-            drawOverlay();
-            updateLinePreviews();
-          });
-          const cancelBtn = document.createElement("button");
-          cancelBtn.className = "btn-small";
-          cancelBtn.textContent = "Cancel";
-          cancelBtn.addEventListener("click", () => {
-            cancelTransform(port);
-            activeSelection = null;
-            renderPorts();
-            drawOverlay();
-            updateLinePreviews();
-          });
-          actionsRow.append(applyBtn, cancelBtn);
-          div.appendChild(actionsRow);
-        } else if (port.editMode === "saveload") {
-          // Save/Load mode — textarea with normalized coordinates
-          const w = mediaW || 1;
-          const h = mediaH || 1;
-          const text = port.points
-            .map((p) => `${(p.x / w).toFixed(6)}\t${(p.y / h).toFixed(6)}`)
-            .join("\n");
-
-          const ta = document.createElement("textarea");
-          ta.className = "saveload-textarea";
-          ta.value = text;
-          ta.spellcheck = false;
-          div.appendChild(ta);
-
-          const slActions = document.createElement("div");
-          slActions.className = "transform-actions";
-
-          const copyBtn = document.createElement("button");
-          copyBtn.className = "btn-small";
-          copyBtn.textContent = "Copy";
-          copyBtn.addEventListener("click", () => {
-            navigator.clipboard.writeText(ta.value).then(() => {
-              copyBtn.textContent = "Copied!";
-              setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
-            });
-          });
-
-          const loadBtn = document.createElement("button");
-          loadBtn.className = "btn-small btn-primary";
-          loadBtn.textContent = "Load";
-          loadBtn.addEventListener("click", () => {
-            const parsed = parseSaveLoadText(ta.value, w, h);
-            if (parsed && parsed.length >= 2) {
-              port.points = parsed;
-              markPortDirty(port);
-              port.editMode = "points";
-              activeSelection = { port: globalIdx, point: 0 };
-              renderPorts();
-              drawOverlay();
-              updateLinePreviews();
-            } else {
-              loadBtn.textContent = "Need 2+ points";
-              setTimeout(() => { loadBtn.textContent = "Load"; }, 2000);
-            }
-          });
-
-          slActions.append(copyBtn, loadBtn);
-          div.appendChild(slActions);
-        }
-      }
-
-      group.appendChild(div);
-      flatIdx++;
-    });
-
-    // Add Port button (per controller)
-    const addPortDiv = document.createElement("div");
-    addPortDiv.className = "controller-actions";
-    const addPBtn = document.createElement("button");
-    addPBtn.className = "btn-small";
-    addPBtn.textContent = "+ Add Port";
-    addPBtn.disabled = ctrl.ports.length >= portsPerController;
-    addPBtn.addEventListener("click", () => {
-      addPort(ci);
-      renderPorts();
-      drawOverlay();
-    });
-    addPortDiv.appendChild(addPBtn);
-    group.appendChild(addPortDiv);
-
-    portsList.appendChild(group);
-  });
-
-  updateLinePreviews();
-}
-
-addPortBtn.addEventListener("click", () => {
-  addController();
-  renderPorts();
-});
+function renderPorts() { rack.render(); toolbar.renderPanel(); }
 
 // ------------------------------------------------------------------ //
 // Live line preview sampling
@@ -1613,7 +995,7 @@ async function updateLinePreviews() {
   }
 
   ports.forEach((port, pi) => {
-    const canvas = linePreviewCanvases.get(pi);
+    const canvas = rack.getLinePreviewCanvases().get(pi);
     if (!canvas) return;
 
     // Resize if LED count changed
@@ -1809,70 +1191,45 @@ async function processMultiPortPreviews(portsToRender) {
 // ------------------------------------------------------------------ //
 
 function getMediaCoords(e) {
-  const rect = videoWrap.getBoundingClientRect();
-  const touch = e.touches?.[0] || e.changedTouches?.[0];
-  const clientX = touch ? touch.clientX : e.clientX;
-  const clientY = touch ? touch.clientY : e.clientY;
-  return {
-    x: Math.round((clientX - rect.left) * (mediaW / rect.width)),
-    y: Math.round((clientY - rect.top) * (mediaH / rect.height)),
-  };
+  return viewport.getMediaCoords(e);
 }
 
 function moveActivePoint(x, y) {
-  if (!activeSelection) return;
-  const port = ports[activeSelection.port];
-
-  if ("control" in activeSelection && port.transformState) {
-    // Transform mode: move control point
-    const s = port.transformState;
-    const key = activeSelection.control;
-
-    // Effective pivot in world space
-    const px = s.center.x + s.offset.x + s.pivot.x;
-    const py = s.center.y + s.offset.y + s.pivot.y;
-
-    if (key === "offset") {
-      s.offset.x = x - s.center.x;
-      s.offset.y = y - s.center.y;
-    } else if (key === "pivot") {
-      s.pivot.x = x - s.center.x - s.offset.x;
-      s.pivot.y = y - s.center.y - s.offset.y;
-    } else if (key === "rotate") {
-      s.angle = Math.atan2(y - py, x - px);
-    } else if (key === "scaleX") {
-      s.scaleX = (x - px) / (s.baseRadius / 2);
-    } else if (key === "scaleY") {
-      s.scaleY = (y - py) / (s.baseRadius / 2);
-    }
-
-    // Update the live polyline for the port
-    port.points = computeTransformedPoints(port.savedPoints, s);
-  } else if ("point" in activeSelection) {
-    // Points mode
-    const pt = port.points[activeSelection.point];
-    pt.x = Math.max(0, Math.min(mediaW - 1, x));
-    pt.y = Math.max(0, Math.min(mediaH - 1, y));
+  // When toolbar transform is active, delegate dragging to toolbar
+  if (toolbar.isTransformActive() && _draggingTransformControl) {
+    toolbar.moveControl(x, y);
+    return;
   }
+
+  if (!activeSelection || !("point" in activeSelection)) return;
+  const port = ports[activeSelection.port];
+  const pt = port.points[activeSelection.point];
+  pt.x = Math.max(0, Math.min(mediaW - 1, x));
+  pt.y = Math.max(0, Math.min(mediaH - 1, y));
 }
 
-/** Find the closest draggable point/control to (mx, my) across all ports */
+/** Find the closest draggable point/control to (mx, my) */
 function findClosestPoint(mx, my) {
   let best = null;
   let bestDist = Infinity;
 
-  ports.forEach((port, pi) => {
-    if (port.editMode === "transform" && port.transformState) {
-      for (const cp of getTransformControlPoints(port)) {
+  // When toolbar transform is active, check transform control handles first
+  if (toolbar.isTransformActive()) {
+    const controls = toolbar.getControlPoints();
+    if (controls) {
+      for (const cp of controls) {
         const d = (cp.x - mx) ** 2 + (cp.y - my) ** 2;
-        if (d < bestDist) { bestDist = d; best = { port: pi, control: cp.key }; }
+        if (d < bestDist) { bestDist = d; best = { transformControl: cp.key }; }
       }
-    } else {
-      port.points.forEach((pt, pti) => {
-        const d = (pt.x - mx) ** 2 + (pt.y - my) ** 2;
-        if (d < bestDist) { bestDist = d; best = { port: pi, point: pti }; }
-      });
     }
+  }
+
+  // Check all port points
+  ports.forEach((port, pi) => {
+    port.points.forEach((pt, pti) => {
+      const d = (pt.x - mx) ** 2 + (pt.y - my) ** 2;
+      if (d < bestDist) { bestDist = d; best = { port: pi, point: pti }; }
+    });
   });
 
   return best;
@@ -1882,18 +1239,40 @@ function findClosestPoint(mx, my) {
 let pointerDown = false;
 let pointerDownPos = null; // media coords at press
 const DRAG_THRESHOLD = 5; // px in media coords before drag starts
+let _draggingTransformControl = false; // true when dragging a toolbar transform handle
 
 function onPointerDown(e) {
-  if (!mediaReady) return;
+  if (!mediaReady || viewport.isPanning()) return;
   pointerDown = true;
+  _draggingTransformControl = false;
   pointerDownPos = getMediaCoords(e);
+
+  // If toolbar transform is active, check if clicking a control handle
+  if (toolbar.isTransformActive()) {
+    const { x, y } = pointerDownPos;
+    const controls = toolbar.getControlPoints();
+    if (controls) {
+      let bestDist = Infinity;
+      let bestKey = null;
+      for (const cp of controls) {
+        const d = (cp.x - x) ** 2 + (cp.y - y) ** 2;
+        if (d < bestDist) { bestDist = d; bestKey = cp.key; }
+      }
+      // If close enough to a control handle, start dragging it
+      if (bestKey && bestDist < 400) { // ~20px radius
+        _draggingTransformControl = true;
+        return;
+      }
+    }
+  }
 }
 
 function onPointerMove(e) {
-  if (!pointerDown) return;
+  if (!pointerDown || viewport.isPanning()) return;
 
   // Start drag only after moving past threshold
-  if (!dragging && pointerDownPos && activeSelection) {
+  const canDrag = activeSelection || _draggingTransformControl;
+  if (!dragging && pointerDownPos && canDrag) {
     const { x, y } = getMediaCoords(e);
     const dx = x - pointerDownPos.x;
     const dy = y - pointerDownPos.y;
@@ -1921,11 +1300,10 @@ function onPointerUp() {
   pointerDownPos = null;
   if (!dragging) return;
   dragging = false;
-  if (activeSelection) {
+  _draggingTransformControl = false;
+  if (activeSelection && "point" in activeSelection) {
     const port = ports[activeSelection.port];
-    if ("point" in activeSelection) {
-      markPortDirty(port);
-    }
+    markPortDirty(port);
   }
   renderPorts();
 }
@@ -1936,8 +1314,12 @@ function onDblSelect(e) {
   e.preventDefault();
   const { x, y } = getMediaCoords(e);
   const closest = findClosestPoint(x, y);
-  if (closest) {
-    activeSelection = closest;
+  if (closest && "point" in closest) {
+    if (e.shiftKey) {
+      togglePoint(closest.port, closest.point);
+    } else {
+      selectPoint(closest.port, closest.point);
+    }
     renderPorts();
     drawOverlay();
   }
@@ -1945,19 +1327,16 @@ function onDblSelect(e) {
 
 /** Fast update of only the active row's input values during drag */
 function updateActiveCoords() {
-  if (!activeSelection) return;
-  const port = ports[activeSelection.port];
-
-  if ("control" in activeSelection && port.transformState) {
-    const s = port.transformState;
+  if (_draggingTransformControl && toolbar.isTransformActive()) {
+    const s = toolbar.getTransformState();
+    if (!s) return;
     const inputMap = {
       "Offset": [Math.round(s.offset.x), Math.round(s.offset.y)],
       "Pivot":  [Math.round(s.pivot.x), Math.round(s.pivot.y)],
       "Rotate": [(s.angle * 180 / Math.PI).toFixed(1)],
-      "ScaleX": [s.scaleX.toFixed(2)],
-      "ScaleY": [s.scaleY.toFixed(2)],
+      "Scale":  [s.scaleX.toFixed(2), s.scaleY.toFixed(2)],
     };
-    const rows = portsList.querySelectorAll(".point-row");
+    const rows = toolbarEl.querySelectorAll(".point-row");
     rows.forEach((row) => {
       const lbl = row.querySelector(".point-label");
       if (!lbl || !inputMap[lbl.textContent]) return;
@@ -1967,29 +1346,28 @@ function updateActiveCoords() {
         if (i < vals.length && document.activeElement !== inp) inp.value = vals[i];
       });
     });
-  } else if ("point" in activeSelection) {
-    const pt = port.points[activeSelection.point];
-    const activeRow = portsList.querySelector(".point-row.active");
-    if (activeRow) {
-      const inputs = activeRow.querySelectorAll(".coord-input");
-      if (inputs[0] && document.activeElement !== inputs[0]) inputs[0].value = pt.x;
-      if (inputs[1] && document.activeElement !== inputs[1]) inputs[1].value = pt.y;
-    }
   }
 }
 
-// Mouse events
-videoWrap.addEventListener("mousedown", onPointerDown);
+// Mouse events (left-click only — middle-click handled by viewport for panning)
+videoWrap.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return; // only left-click
+  onPointerDown(e);
+});
 window.addEventListener("mousemove", onPointerMove);
 window.addEventListener("mouseup", onPointerUp);
 videoWrap.addEventListener("dblclick", onDblSelect);
 
-// Touch events
+// Touch events (single-touch only — two-finger gestures handled by viewport)
 videoWrap.addEventListener("touchstart", (e) => {
+  if (e.touches.length >= 2) return; // let viewport handle pinch-zoom
   e.preventDefault();
   onPointerDown(e);
 }, { passive: false });
-window.addEventListener("touchmove", (e) => { onPointerMove(e); }, { passive: false });
+window.addEventListener("touchmove", (e) => {
+  if (e.touches.length >= 2) return;
+  onPointerMove(e);
+}, { passive: false });
 window.addEventListener("touchend", onPointerUp);
 
 // Double-tap detection for touch
@@ -2012,6 +1390,8 @@ async function drawOverlay() {
   if (!mediaReady) return;
   overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
+  viewport.applyTransform(overlayCtx);
+
   if (mediaType === "image" && loadedImage) {
     overlayCtx.drawImage(loadedImage, 0, 0);
   } else if (mediaType === "video" && frames.length > 0) {
@@ -2020,173 +1400,185 @@ async function drawOverlay() {
   }
 
   drawOverlayPorts();
+
+  viewport.restoreTransform(overlayCtx);
 }
 
 /** Draw port polylines and control points on the overlay (no background clear/draw) */
 function drawOverlayPorts() {
-  ports.forEach((port, pi) => {
-    const color = PORT_COLORS[pi % PORT_COLORS.length];
+  const transformActive = toolbar.isTransformActive();
+  const savedPositions = transformActive ? toolbar.getSavedPositions() : null;
 
-    if (port.editMode === "transform" && port.savedPoints && port.transformState) {
-      // Draw saved (original) polyline in faded color
-      overlayCtx.globalAlpha = 0.3;
-      overlayCtx.strokeStyle = color;
-      overlayCtx.lineWidth = 2;
-      overlayCtx.beginPath();
-      overlayCtx.moveTo(port.savedPoints[0].x, port.savedPoints[0].y);
-      for (let i = 1; i < port.savedPoints.length; i++) {
-        overlayCtx.lineTo(port.savedPoints[i].x, port.savedPoints[i].y);
-      }
-      overlayCtx.stroke();
-      overlayCtx.globalAlpha = 1;
+  // When transform is active, draw ghost (original) positions for affected ports
+  if (transformActive && savedPositions && savedPositions.size > 0) {
+    // Group saved positions by port for ghost polyline drawing
+    const portGhosts = new Map(); // portIdx → [{pointIdx, x, y}]
+    for (const [key, saved] of savedPositions) {
+      const [pi, pti] = key.split(":").map(Number);
+      if (!portGhosts.has(pi)) portGhosts.set(pi, []);
+      portGhosts.get(pi).push({ pointIdx: pti, x: saved.x, y: saved.y });
+    }
 
-      // Draw transformed polyline in full color
-      const transformed = computeTransformedPoints(port.savedPoints, port.transformState);
-      overlayCtx.strokeStyle = color;
-      overlayCtx.lineWidth = 2;
-      overlayCtx.beginPath();
-      overlayCtx.moveTo(transformed[0].x, transformed[0].y);
-      for (let i = 1; i < transformed.length; i++) {
-        overlayCtx.lineTo(transformed[i].x, transformed[i].y);
-      }
-      overlayCtx.stroke();
+    for (const [pi, ghostPts] of portGhosts) {
+      const port = ports[pi];
+      if (!port) continue;
+      const color = rack.PORT_COLORS[pi % rack.PORT_COLORS.length];
 
-      // Point labels on transformed polyline
-      transformed.forEach((pt, pti) => {
-        overlayCtx.fillStyle = color;
-        overlayCtx.beginPath();
-        overlayCtx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
-        overlayCtx.fill();
-        overlayCtx.fillStyle = "#fff";
-        overlayCtx.font = "12px sans-serif";
-        overlayCtx.fillText(String.fromCharCode(65 + pti), pt.x + 10, pt.y - 10);
+      // Build full original polyline (mix ghost + current positions)
+      const origPts = port.points.map((pt, pti) => {
+        const ghost = ghostPts.find(g => g.pointIdx === pti);
+        return ghost ? { x: ghost.x, y: ghost.y } : { x: pt.x, y: pt.y };
       });
 
-      // Draw transform control points
-      const controls = getTransformControlPoints(port);
-      for (const cp of controls) {
-        const isActive = activeSelection &&
-          activeSelection.port === pi &&
-          "control" in activeSelection &&
-          activeSelection.control === cp.key;
-
-        if (cp.key === "offset") {
-          // Offset: square handle (primary move)
-          const sz = isActive ? 8 : 6;
-          overlayCtx.fillStyle = isActive ? "#fff" : "#00ff88";
-          overlayCtx.fillRect(cp.x - sz, cp.y - sz, sz * 2, sz * 2);
-          if (isActive) {
-            overlayCtx.strokeStyle = "#fff";
-            overlayCtx.lineWidth = 2;
-            overlayCtx.strokeRect(cp.x - sz - 3, cp.y - sz - 3, (sz + 3) * 2, (sz + 3) * 2);
-          }
-          overlayCtx.fillStyle = "#fff";
-          overlayCtx.font = "11px sans-serif";
-          overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
-        } else if (cp.key === "pivot") {
-          // Pivot: crosshair + diamond
-          const sz = 8;
-          overlayCtx.strokeStyle = isActive ? "#fff" : "#ffaa00";
-          overlayCtx.lineWidth = 2;
-          overlayCtx.beginPath();
-          overlayCtx.moveTo(cp.x - sz, cp.y); overlayCtx.lineTo(cp.x + sz, cp.y);
-          overlayCtx.moveTo(cp.x, cp.y - sz); overlayCtx.lineTo(cp.x, cp.y + sz);
-          overlayCtx.stroke();
-          overlayCtx.beginPath();
-          overlayCtx.moveTo(cp.x, cp.y - sz);
-          overlayCtx.lineTo(cp.x + sz, cp.y);
-          overlayCtx.lineTo(cp.x, cp.y + sz);
-          overlayCtx.lineTo(cp.x - sz, cp.y);
-          overlayCtx.closePath();
-          overlayCtx.stroke();
-        } else {
-          // Other handles: larger circles
-          overlayCtx.fillStyle = isActive ? "#fff" : "#00aaff";
-          overlayCtx.beginPath();
-          overlayCtx.arc(cp.x, cp.y, isActive ? 8 : 6, 0, Math.PI * 2);
-          overlayCtx.fill();
-          if (isActive) {
-            overlayCtx.strokeStyle = "#fff";
-            overlayCtx.lineWidth = 2;
-            overlayCtx.beginPath();
-            overlayCtx.arc(cp.x, cp.y, 11, 0, Math.PI * 2);
-            overlayCtx.stroke();
-          }
-          // Label
-          overlayCtx.fillStyle = "#fff";
-          overlayCtx.font = "11px sans-serif";
-          overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
-        }
-
-        // Draw dashed lines: offset→pivot, pivot→rotate/scale handles
-        if (cp.key === "pivot") {
-          const off = controls.find((c) => c.key === "offset");
-          if (off) {
-            overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
-            overlayCtx.lineWidth = 1;
-            overlayCtx.setLineDash([4, 4]);
-            overlayCtx.beginPath();
-            overlayCtx.moveTo(off.x, off.y);
-            overlayCtx.lineTo(cp.x, cp.y);
-            overlayCtx.stroke();
-            overlayCtx.setLineDash([]);
-          }
-        } else if (cp.key !== "offset") {
-          const pivot = controls.find((c) => c.key === "pivot");
-          if (pivot) {
-            overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
-            overlayCtx.lineWidth = 1;
-            overlayCtx.setLineDash([4, 4]);
-            overlayCtx.beginPath();
-            overlayCtx.moveTo(pivot.x, pivot.y);
-            overlayCtx.lineTo(cp.x, cp.y);
-            overlayCtx.stroke();
-            overlayCtx.setLineDash([]);
-          }
-        }
-      }
-    } else {
-      // Points mode: current behavior
-      const pts = port.points;
-
+      overlayCtx.globalAlpha = 0.25;
       overlayCtx.strokeStyle = color;
       overlayCtx.lineWidth = 2;
+      overlayCtx.setLineDash([6, 4]);
       overlayCtx.beginPath();
-      overlayCtx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) {
-        overlayCtx.lineTo(pts[i].x, pts[i].y);
+      overlayCtx.moveTo(origPts[0].x, origPts[0].y);
+      for (let i = 1; i < origPts.length; i++) {
+        overlayCtx.lineTo(origPts[i].x, origPts[i].y);
       }
       overlayCtx.stroke();
+      overlayCtx.setLineDash([]);
+      overlayCtx.globalAlpha = 1;
+    }
+  }
 
-      pts.forEach((pt, pti) => {
-        const isActive = activeSelection &&
-          activeSelection.port === pi &&
-          "point" in activeSelection &&
-          activeSelection.point === pti;
+  // Draw all port polylines and points
+  ports.forEach((port, pi) => {
+    const color = rack.PORT_COLORS[pi % rack.PORT_COLORS.length];
+    const pts = port.points;
 
-        overlayCtx.fillStyle = isActive ? "#fff" : color;
+    overlayCtx.strokeStyle = color;
+    overlayCtx.lineWidth = 2;
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      overlayCtx.lineTo(pts[i].x, pts[i].y);
+    }
+    overlayCtx.stroke();
+
+    pts.forEach((pt, pti) => {
+      const isActive = activeSelection &&
+        activeSelection.port === pi &&
+        "point" in activeSelection &&
+        activeSelection.point === pti;
+      const isSelected = isPointSelected(pi, pti);
+
+      // Selected points get a cyan highlight ring
+      if (isSelected) {
+        overlayCtx.strokeStyle = "#00aaff";
+        overlayCtx.lineWidth = 2;
         overlayCtx.beginPath();
-        overlayCtx.arc(pt.x, pt.y, isActive ? 7 : 5, 0, Math.PI * 2);
-        overlayCtx.fill();
+        overlayCtx.arc(pt.x, pt.y, 9, 0, Math.PI * 2);
+        overlayCtx.stroke();
+      }
 
+      overlayCtx.fillStyle = isActive ? "#fff" : isSelected ? "#00aaff" : color;
+      overlayCtx.beginPath();
+      overlayCtx.arc(pt.x, pt.y, isActive ? 7 : 5, 0, Math.PI * 2);
+      overlayCtx.fill();
+
+      if (isActive) {
+        overlayCtx.strokeStyle = "#fff";
+        overlayCtx.lineWidth = 2;
+        overlayCtx.beginPath();
+        overlayCtx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
+        overlayCtx.stroke();
+      }
+
+      overlayCtx.fillStyle = "#fff";
+      overlayCtx.font = "12px sans-serif";
+      overlayCtx.fillText(
+        String.fromCharCode(65 + pti),
+        pt.x + 10,
+        pt.y - 10
+      );
+    });
+  });
+
+  // Draw transform control handles when toolbar transform is active
+  if (transformActive) {
+    const controls = toolbar.getControlPoints();
+    if (!controls) return;
+    const activeCtrl = toolbar.getActiveControl();
+
+    for (const cp of controls) {
+      const isActive = activeCtrl === cp.key;
+
+      if (cp.key === "offset") {
+        const sz = isActive ? 8 : 6;
+        overlayCtx.fillStyle = isActive ? "#fff" : "#00ff88";
+        overlayCtx.fillRect(cp.x - sz, cp.y - sz, sz * 2, sz * 2);
+        if (isActive) {
+          overlayCtx.strokeStyle = "#fff";
+          overlayCtx.lineWidth = 2;
+          overlayCtx.strokeRect(cp.x - sz - 3, cp.y - sz - 3, (sz + 3) * 2, (sz + 3) * 2);
+        }
+        overlayCtx.fillStyle = "#fff";
+        overlayCtx.font = "11px sans-serif";
+        overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
+      } else if (cp.key === "pivot") {
+        const sz = 8;
+        overlayCtx.strokeStyle = isActive ? "#fff" : "#ffaa00";
+        overlayCtx.lineWidth = 2;
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(cp.x - sz, cp.y); overlayCtx.lineTo(cp.x + sz, cp.y);
+        overlayCtx.moveTo(cp.x, cp.y - sz); overlayCtx.lineTo(cp.x, cp.y + sz);
+        overlayCtx.stroke();
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(cp.x, cp.y - sz);
+        overlayCtx.lineTo(cp.x + sz, cp.y);
+        overlayCtx.lineTo(cp.x, cp.y + sz);
+        overlayCtx.lineTo(cp.x - sz, cp.y);
+        overlayCtx.closePath();
+        overlayCtx.stroke();
+      } else {
+        overlayCtx.fillStyle = isActive ? "#fff" : "#00aaff";
+        overlayCtx.beginPath();
+        overlayCtx.arc(cp.x, cp.y, isActive ? 8 : 6, 0, Math.PI * 2);
+        overlayCtx.fill();
         if (isActive) {
           overlayCtx.strokeStyle = "#fff";
           overlayCtx.lineWidth = 2;
           overlayCtx.beginPath();
-          overlayCtx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
+          overlayCtx.arc(cp.x, cp.y, 11, 0, Math.PI * 2);
           overlayCtx.stroke();
         }
-
         overlayCtx.fillStyle = "#fff";
-        overlayCtx.font = "12px sans-serif";
-        overlayCtx.fillText(
-          String.fromCharCode(65 + pti),
-          pt.x + 10,
-          pt.y - 10
-        );
-      });
+        overlayCtx.font = "11px sans-serif";
+        overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
+      }
+
+      // Draw dashed lines: offset→pivot, pivot→rotate/scale handles
+      if (cp.key === "pivot") {
+        const off = controls.find((c) => c.key === "offset");
+        if (off) {
+          overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
+          overlayCtx.lineWidth = 1;
+          overlayCtx.setLineDash([4, 4]);
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(off.x, off.y);
+          overlayCtx.lineTo(cp.x, cp.y);
+          overlayCtx.stroke();
+          overlayCtx.setLineDash([]);
+        }
+      } else if (cp.key !== "offset") {
+        const pivot = controls.find((c) => c.key === "pivot");
+        if (pivot) {
+          overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
+          overlayCtx.lineWidth = 1;
+          overlayCtx.setLineDash([4, 4]);
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(pivot.x, pivot.y);
+          overlayCtx.lineTo(cp.x, cp.y);
+          overlayCtx.stroke();
+          overlayCtx.setLineDash([]);
+        }
+      }
     }
-  });
+  }
 }
 
 // ------------------------------------------------------------------ //
@@ -2228,589 +1620,119 @@ function detectFPS() {
 }
 
 // ------------------------------------------------------------------ //
-// Sampling
+// Sampling (delegates to renderer/sampling.js)
 // ------------------------------------------------------------------ //
 
-function samplePolyline(ctx, points, numSamples) {
-  const out = new Uint8Array(numSamples * 3);
-
-  const segLengths = [];
-  let totalLength = 0;
-  for (let i = 1; i < points.length; i++) {
-    const dx = points[i].x - points[i - 1].x;
-    const dy = points[i].y - points[i - 1].y;
-    segLengths.push(Math.sqrt(dx * dx + dy * dy));
-    totalLength += segLengths[segLengths.length - 1];
-  }
-
-  if (totalLength === 0) {
-    const px = Math.max(0, Math.min(points[0].x, mediaW - 1));
-    const py = Math.max(0, Math.min(points[0].y, mediaH - 1));
-    const pixel = ctx.getImageData(px, py, 1, 1).data;
-    for (let i = 0; i < numSamples; i++) {
-      out[i * 3] = pixel[0];
-      out[i * 3 + 1] = pixel[1];
-      out[i * 3 + 2] = pixel[2];
-    }
-    return out;
-  }
-
-  for (let i = 0; i < numSamples; i++) {
-    const dist = numSamples === 1 ? 0 : (i / (numSamples - 1)) * totalLength;
-
-    let remaining = dist;
-    let seg = 0;
-    while (seg < segLengths.length - 1 && remaining > segLengths[seg]) {
-      remaining -= segLengths[seg];
-      seg++;
-    }
-
-    const segLen = segLengths[seg] || 1;
-    const t = Math.min(remaining / segLen, 1);
-    const x = Math.round(points[seg].x + t * (points[seg + 1].x - points[seg].x));
-    const y = Math.round(points[seg].y + t * (points[seg + 1].y - points[seg].y));
-
-    const px = Math.max(0, Math.min(x, mediaW - 1));
-    const py = Math.max(0, Math.min(y, mediaH - 1));
-
-    const pixel = ctx.getImageData(px, py, 1, 1).data;
-    out[i * 3] = pixel[0];
-    out[i * 3 + 1] = pixel[1];
-    out[i * 3 + 2] = pixel[2];
-  }
-
-  return out;
-}
-
-/** Sample a port's polyline, applying trimStart/trimEnd (trimmed LEDs are black). */
 function samplePortLine(ctx, port) {
-  const active = port.leds - port.trimStart - port.trimEnd;
-  if (active <= 0) return new Uint8Array(port.leds * 3);
-  const sampled = samplePolyline(ctx, port.points, active);
-  const out = new Uint8Array(port.leds * 3); // all black
-  out.set(sampled, port.trimStart * 3);
-  return out;
+  return _samplePortLine(ctx, port, mediaW, mediaH);
 }
 
 // ------------------------------------------------------------------ //
 // Processing
 // ------------------------------------------------------------------ //
 
+// Export, save, and load delegated to modules (output/export.js, scene/save.js, scene/load.js)
+
 async function doExport() {
-  if (!mediaReady) {
-    setStatus("Load a video or image first.");
-    return;
-  }
-
-  if (ports.length === 0) {
-    setStatus("Add at least one port.");
-    return;
-  }
-
-  const isImage = mediaType === "image";
-  const fps = detectedFPS || 30;
-  const totalFrames = isImage ? 1 : (outPoint - inPoint + 1);
-
-  if (totalFrames <= 0) {
-    setStatus("Could not determine frame count.");
-    return;
-  }
-
-  exporting = true;
-  renderOutputSection();
-  const pBar = document.getElementById("progress-bar");
-  const pFill = document.getElementById("progress-fill");
-  if (pBar) pBar.style.display = "block";
-
-  // Render any dirty ports first — single video pass for all dirty ports
-  const dirtyPorts = ports.filter((p) => portDirty.has(p));
-  if (dirtyPorts.length > 0) {
-    setStatus(`Rendering ${dirtyPorts.length} port(s)...`);
-    await processMultiPortPreviews(dirtyPorts);
-  }
-
-  // Build DAT from rendered preview canvases
-  setStatus("Building DAT file...");
-  await new Promise((r) => setTimeout(r, 0));
-
-  const dat = new DATFile();
-  if (templateHeaderBuffer) {
-    dat.loadTemplateHeader(templateHeaderBuffer);
-  }
-  for (const port of ports) {
-    dat.addUniverse(port.leds);
-  }
-  dat.setNumFrames(totalFrames);
-
-  for (let pi = 0; pi < ports.length; pi++) {
-    const port = ports[pi];
-    const preview = portPreviewCanvases.get(port);
-    if (!preview) continue;
-
-    const ctx = preview.getContext("2d", { willReadFrequently: true });
-    for (let f = 0; f < totalFrames; f++) {
-      const row = ctx.getImageData(0, f, port.leds, 1).data;
-      for (let p = 0; p < port.leds; p++) {
-        dat.setPixel(pi, f, p, row[p * 4], row[p * 4 + 1], row[p * 4 + 2]);
-      }
-    }
-
-    if (pFill) pFill.style.width = ((pi + 1) / ports.length * 100) + "%";
-  }
-
-  if (pFill) pFill.style.width = "100%";
-  const totalLeds = ports.reduce((s, p) => s + p.leds, 0);
-
-  // Download
-  if (includeTxt) {
-    setStatus("Packing zip...");
-    await new Promise((r) => setTimeout(r, 0));
-    const datBytes = dat.toUint8Array();
-    const txtBytes = new TextEncoder().encode(dat.toTxt());
-    const zip = buildZip([
-      { name: "output.dat", data: datBytes },
-      { name: "output.txt", data: txtBytes },
-    ]);
-    downloadBlob(zip, "output.zip");
-  } else {
-    dat.download("output.dat");
-  }
-
-  setStatus(`Done. ${totalFrames} frame(s), ${ports.length} port(s), ${totalLeds} total LEDs.`);
-  exporting = false;
-  renderOutputSection();
-  // Hide progress bar after re-render
-  const pBar2 = document.getElementById("progress-bar");
-  if (pBar2) pBar2.style.display = "none";
-}
-
-// ------------------------------------------------------------------ //
-// ZIP builder (STORE, no compression — zero dependencies)
-// ------------------------------------------------------------------ //
-
-function buildZip(files) {
-  const entries = [];
-  let offset = 0;
-
-  // Local file headers + data
-  const localParts = [];
-  for (const { name, data } of files) {
-    const nameBytes = new TextEncoder().encode(name);
-    const crc = crc32(data);
-
-    // Local file header (30 + nameLen bytes)
-    const lh = new Uint8Array(30 + nameBytes.length);
-    const lv = new DataView(lh.buffer);
-    lv.setUint32(0, 0x04034b50, true);  // signature
-    lv.setUint16(4, 20, true);          // version needed
-    lv.setUint16(8, 0, true);           // method: STORE
-    lv.setUint32(14, crc, true);        // CRC-32
-    lv.setUint32(18, data.length, true); // compressed size
-    lv.setUint32(22, data.length, true); // uncompressed size
-    lv.setUint16(26, nameBytes.length, true);
-    lh.set(nameBytes, 30);
-
-    entries.push({ nameBytes, crc, size: data.length, offset });
-    localParts.push(lh, data);
-    offset += lh.length + data.length;
-  }
-
-  // Central directory
-  const cdParts = [];
-  let cdSize = 0;
-  for (const e of entries) {
-    const cd = new Uint8Array(46 + e.nameBytes.length);
-    const cv = new DataView(cd.buffer);
-    cv.setUint32(0, 0x02014b50, true);  // signature
-    cv.setUint16(4, 20, true);          // version made by
-    cv.setUint16(6, 20, true);          // version needed
-    cv.setUint16(10, 0, true);          // method: STORE
-    cv.setUint32(16, e.crc, true);
-    cv.setUint32(20, e.size, true);
-    cv.setUint32(24, e.size, true);
-    cv.setUint16(28, e.nameBytes.length, true);
-    cv.setUint32(42, e.offset, true);   // local header offset
-    cd.set(e.nameBytes, 46);
-    cdParts.push(cd);
-    cdSize += cd.length;
-  }
-
-  // End of central directory
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, entries.length, true);
-  ev.setUint16(10, entries.length, true);
-  ev.setUint32(12, cdSize, true);
-  ev.setUint32(16, offset, true);
-
-  return new Blob([...localParts, ...cdParts, eocd], { type: "application/zip" });
-}
-
-function crc32(data) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < data.length; i++) {
-    crc ^= data[i];
-    for (let j = 0; j < 8; j++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ------------------------------------------------------------------ //
-// Scene save / load (JS + PNGs in a zip)
-// ------------------------------------------------------------------ //
-
-/**
- * Serialize the current scene to a human-readable JS string.
- * @param {Map<Port, string>|null} previewFileMap - maps port → filename in the zip
- */
-function serializeScene(previewFileMap) {
-  const scene = {
-    version: 1,
-    portsPerController,
-    maxResolution,
-    frameOffset,
-    frameLength,
-    detectedFPS,
-    mediaType,
-    mediaW,
-    mediaH,
-    frameCount: frames.length,
+  if (!mediaReady) { setStatus("Load a video or image first."); return; }
+  if (ports.length === 0) { setStatus("Add at least one port."); return; }
+  return _doExport({
+    ports,
+    isImage: mediaType === "image",
+    fps: detectedFPS || 30,
     inPoint,
     outPoint,
-    templateHeader: templateHeaderBuffer
-      ? btoa(String.fromCharCode(...new Uint8Array(templateHeaderBuffer.slice(0, 512))))
-      : null,
-    templateFileName,
-    controllers: controllers.map((ctrl) => ({
-      collapsed: ctrl.collapsed,
-      ports: ctrl.ports.map((port) => {
-        const p = {
-          leds: port.leds,
-          trimStart: port.trimStart,
-          trimEnd: port.trimEnd,
-          points: port.points.map((pt) => ({ x: pt.x, y: pt.y })),
-          collapsed: port.collapsed,
-          previewCollapsed: port.previewCollapsed,
-          editMode: "points",
-        };
-        if (previewFileMap && previewFileMap.has(port)) {
-          const canvas = portPreviewCanvases.get(port);
-          p.previewFile = previewFileMap.get(port);
-          p.previewMeta = {
-            totalFrames: canvas._totalFrames || 1,
-            fps: canvas._fps || 30,
-            leds: canvas._leds || port.leds,
-          };
-        }
-        return p;
-      }),
-    })),
-  };
-
-  return "// Le-Dat Converter Scene\n"
-    + "// Load this file in the app to restore the scene.\n"
-    + "const scene = " + JSON.stringify(scene, null, 2) + ";\n";
-}
-
-/** Convert a canvas to a Uint8Array in the given format */
-function canvasToBlob(canvas, type = "image/png", quality) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      blob.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
-    }, type, quality);
+    templateHeaderBuffer,
+    includeTxt,
+    portPreviewCanvases,
+    portDirty,
+    processMultiPortPreviews,
+    setStatus,
+    setExporting(v) { exporting = v; },
+    renderOutputSection,
   });
 }
 
-/** Convert an ImageBitmap or HTMLImageElement to a JPEG Uint8Array */
-function imageToJPEG(img, w, h) {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  c.getContext("2d").drawImage(img, 0, 0);
-  return canvasToBlob(c, "image/jpeg", 0.50);
-}
-
-async function saveScene() {
-  setStatus("Saving scene...");
-  const zipFiles = [];
-  const previewFileMap = new Map();
-
-  // 1. Collect preview PNGs (pixel-exact, keep lossless)
-  let ci = 0;
-  for (const ctrl of controllers) {
-    let pi = 0;
-    for (const port of ctrl.ports) {
-      const canvas = portPreviewCanvases.get(port);
-      if (canvas) {
-        const filename = `preview_${ci}_${pi}.png`;
-        previewFileMap.set(port, filename);
-        const pngBytes = await canvasToBlob(canvas);
-        zipFiles.push({ name: filename, data: pngBytes });
-      }
-      pi++;
-    }
-    ci++;
-  }
-
-  // 2. Save media as JPEG (image or video frames)
-  if (mediaType === "image" && loadedImage) {
-    setStatus("Saving image...");
-    const jpgBytes = await imageToJPEG(loadedImage, mediaW, mediaH);
-    zipFiles.push({ name: "media.jpg", data: jpgBytes });
-  } else if (mediaType === "video" && frames.length > 0) {
-    for (let i = 0; i < frames.length; i++) {
-      if (i % 10 === 0) {
-        setStatus(`Saving frames (${i}/${frames.length})...`);
-        await new Promise((r) => setTimeout(r, 0));
-      }
-      // Frames are already JPEG blobs — just grab the bytes directly
-      const buf = await frames[i].arrayBuffer();
-      zipFiles.push({ name: `frames/${String(i).padStart(5, "0")}.jpg`, data: new Uint8Array(buf) });
-    }
-  }
-
-  // 3. Build scene.js (after previews so previewFileMap is complete)
-  setStatus("Packing zip...");
-  await new Promise((r) => setTimeout(r, 0));
-  const sceneText = serializeScene(previewFileMap);
-  zipFiles.unshift({ name: "scene.js", data: new TextEncoder().encode(sceneText) });
-
-  // 4. Build and download zip
-  const zip = buildZip(zipFiles);
-  downloadBlob(zip, "scene.zip");
-  setStatus("Scene saved.");
-}
-
-/**
- * Parse a STORE-method zip into { name, data } entries.
- * @param {ArrayBuffer} buffer
- * @returns {{ name: string, data: Uint8Array }[]}
- */
-function parseZip(buffer) {
-  const view = new DataView(buffer);
-  const files = [];
-  let offset = 0;
-
-  while (offset + 30 <= buffer.byteLength) {
-    const sig = view.getUint32(offset, true);
-    if (sig !== 0x04034b50) break;
-
-    const compSize = view.getUint32(offset + 18, true);
-    const nameLen = view.getUint16(offset + 26, true);
-    const extraLen = view.getUint16(offset + 28, true);
-
-    const nameBytes = new Uint8Array(buffer, offset + 30, nameLen);
-    const name = new TextDecoder().decode(nameBytes);
-
-    const dataStart = offset + 30 + nameLen + extraLen;
-    const data = new Uint8Array(buffer.slice(dataStart, dataStart + compSize));
-
-    files.push({ name, data });
-    offset = dataStart + compSize;
-  }
-
-  return files;
-}
-
-/**
- * Deserialize a scene JS string and restore all state.
- * @param {string} text - the scene.js content
- * @param {Map<string, Uint8Array>|null} fileMap - zip entries keyed by filename
- */
-async function deserializeScene(text, fileMap) {
-  const jsonMatch = text.match(/const\s+scene\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
-  if (!jsonMatch) throw new Error("Invalid scene file format");
-
-  const scene = JSON.parse(jsonMatch[1]);
-
-  // Clear existing state
-  for (const port of ports) {
-    portDirty.delete(port);
-    portPreviewCanvases.delete(port);
-    portPreviewProcessing.delete(port);
-  }
-  clearDecodedFrame();
-  frames = [];
-  loadedImage = null;
-  controllers = [];
-  ports = [];
-  activeSelection = null;
-  currentFrameIdx = 0;
-
-  // Restore settings
-  if (scene.portsPerController != null) portsPerController = scene.portsPerController;
-  if (scene.maxResolution != null) maxResolution = scene.maxResolution;
-  if (scene.frameOffset != null) frameOffset = scene.frameOffset;
-  if (scene.frameLength != null) frameLength = scene.frameLength;
-  if (scene.detectedFPS != null) detectedFPS = scene.detectedFPS;
-  if (scene.inPoint != null) inPoint = scene.inPoint;
-  if (scene.outPoint != null) outPoint = scene.outPoint;
-
-  // Restore template header
-  if (scene.templateHeader) {
-    const binary = atob(scene.templateHeader);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    templateHeaderBuffer = bytes.buffer;
-    templateFileName = scene.templateFileName || "restored.dat";
-  }
-
-  // Restore media infrastructure
-  const w = scene.mediaW || 0;
-  const h = scene.mediaH || 0;
-  if (w > 0 && h > 0) {
-    mediaW = w;
-    mediaH = h;
-    mediaType = scene.mediaType || "";
-    mediaReady = true;
-
-    overlay.width = w;
-    overlay.height = h;
-    video.style.display = "none";
-    overlay.classList.add("static");
-
-    sampleCanvas = document.createElement("canvas");
-    sampleCanvas.width = w;
-    sampleCanvas.height = h;
-    sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
-  }
-
-  // Restore media content from zip
-  if (fileMap) {
-    const mediaFile = fileMap.get("media.jpg") || fileMap.get("media.png");
-    if (scene.mediaType === "image" && mediaFile) {
-      setStatus("Loading image...");
-      const blob = new Blob([mediaFile], { type: "image/jpeg" });
-      const url = URL.createObjectURL(blob);
-      loadedImage = new Image();
-      await new Promise((resolve) => { loadedImage.onload = resolve; loadedImage.src = url; });
-      URL.revokeObjectURL(url);
-    } else if (scene.mediaType === "video") {
-      const frameCount = scene.frameCount || 0;
-      for (let i = 0; i < frameCount; i++) {
-        const pad = String(i).padStart(5, "0");
-        const data = fileMap.get(`frames/${pad}.jpg`) || fileMap.get(`frames/${pad}.png`);
-        if (!data) break;
-        if (i % 10 === 0) {
-          setStatus(`Loading frames (${i}/${frameCount})...`);
-          await new Promise((r) => setTimeout(r, 0));
-        }
-        // Store as JPEG blobs directly — no need to decode to ImageBitmap
-        frames.push(new Blob([data], { type: "image/jpeg" }));
-      }
-    }
-  }
-
-  // Clamp in/out points to frame range
-  if (frames.length > 0) {
-    inPoint = Math.max(0, Math.min(inPoint, frames.length - 1));
-    outPoint = Math.max(inPoint, Math.min(outPoint, frames.length - 1));
-  }
-
-  // Restore controllers and ports
-  const portDataList = [];
-  for (const ctrl of scene.controllers) {
-    const ci = controllers.length;
-    controllers.push({ ports: [], collapsed: ctrl.collapsed ?? false });
-
-    for (const portData of ctrl.ports) {
-      const port = {
-        leds: portData.leds ?? 400,
-        trimStart: portData.trimStart ?? 0,
-        trimEnd: portData.trimEnd ?? 0,
-        points: (portData.points || []).map((p) => ({ x: p.x, y: p.y })),
-        collapsed: portData.collapsed ?? false,
-        previewCollapsed: portData.previewCollapsed ?? true,
-        editMode: portData.editMode ?? "points",
-        savedPoints: null,
-        transformState: null,
-      };
-      controllers[ci].ports.push(port);
-      portDirty.add(port);
-      portDataList.push(portData);
-    }
-  }
-
-  rebuildPortsList();
-
-  // Restore preview canvases from PNGs
-  if (fileMap) {
-    for (let i = 0; i < ports.length; i++) {
-      const pd = portDataList[i];
-      if (!pd.previewFile || !fileMap.has(pd.previewFile)) continue;
-
-      const pngData = fileMap.get(pd.previewFile);
-      const blob = new Blob([pngData], { type: "image/png" });
-      const bmp = await createImageBitmap(blob);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = bmp.width;
-      canvas.height = bmp.height;
-      canvas.getContext("2d").drawImage(bmp, 0, 0);
-      bmp.close();
-
-      const meta = pd.previewMeta || {};
-      canvas._totalFrames = meta.totalFrames || canvas.height;
-      canvas._fps = meta.fps || 30;
-      canvas._leds = meta.leds || canvas.width;
-
-      portPreviewCanvases.set(ports[i], canvas);
-      portDirty.delete(ports[i]);
-    }
-  }
-
-  renderPorts();
-  drawOverlay();
-  updateLinePreviews();
-  renderOutputSection();
+function saveScene() {
+  return _saveScene({
+    controllers, ports, portPreviewCanvases,
+    portsPerController, maxResolution, frameOffset, frameLength,
+    detectedFPS, mediaType, mediaW, mediaH,
+    frames, inPoint, outPoint,
+    templateHeaderBuffer, templateFileName,
+    loadedImage,
+  }, setStatus);
 }
 
 function loadScene() {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".zip,.js";
-  input.addEventListener("change", async () => {
-    const file = input.files[0];
-    if (!file) return;
-
-    try {
-      if (file.name.endsWith(".js") || file.name.endsWith(".json") || file.name.endsWith(".txt")) {
-        const text = await file.text();
-        await deserializeScene(text, null);
-      } else {
-        setStatus("Loading scene...");
-        const buffer = await file.arrayBuffer();
-        const entries = parseZip(buffer);
-
-        const sceneEntry = entries.find((e) => e.name === "scene.js");
-        if (!sceneEntry) throw new Error("No scene.js found in archive");
-
-        const fileMap = new Map();
-        for (const e of entries) {
-          if (e.name !== "scene.js") fileMap.set(e.name, e.data);
-        }
-
-        const text = new TextDecoder().decode(sceneEntry.data);
-        await deserializeScene(text, fileMap);
-      }
-      setStatus(`Scene loaded from ${file.name}`);
-    } catch (e) {
-      setStatus(`Failed to load scene: ${e.message}`);
+  _loadScene((result) => {
+    // Clear existing state
+    for (const port of ports) {
+      portDirty.delete(port);
+      portPreviewCanvases.delete(port);
+      portPreviewProcessing.delete(port);
     }
-  });
-  input.click();
+    clearDecodedFrame();
+
+    // Apply restored state
+    if (result.portsPerController != null) portsPerController = result.portsPerController;
+    if (result.maxResolution != null) maxResolution = result.maxResolution;
+    if (result.frameOffset != null) frameOffset = result.frameOffset;
+    if (result.frameLength != null) frameLength = result.frameLength;
+    if (result.detectedFPS != null) detectedFPS = result.detectedFPS;
+
+    frames = result.frames;
+    loadedImage = result.loadedImage;
+    controllers = result.controllers;
+    activeSelection = null;
+    toolbar.onSelectionChanged();
+    currentFrameIdx = 0;
+    mediaType = result.mediaType;
+    inPoint = result.inPoint;
+    outPoint = result.outPoint;
+
+    if (result.templateHeaderBuffer) {
+      templateHeaderBuffer = result.templateHeaderBuffer;
+      templateFileName = result.templateFileName || "restored.dat";
+    }
+
+    const w = result.mediaW;
+    const h = result.mediaH;
+    if (w > 0 && h > 0) {
+      mediaW = w;
+      mediaH = h;
+      mediaReady = true;
+      overlay.width = w;
+      overlay.height = h;
+      video.style.display = "none";
+      overlay.classList.add("static");
+      sampleCanvas = document.createElement("canvas");
+      sampleCanvas.width = w;
+      sampleCanvas.height = h;
+      sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+      viewport.setMediaSize(w, h);
+      viewport.resetView();
+    }
+
+    rebuildPortsList();
+
+    // Restore preview canvases
+    if (result.previewCanvases) {
+      for (const [port, canvas] of result.previewCanvases) {
+        portPreviewCanvases.set(port, canvas);
+        portDirty.delete(port);
+      }
+    }
+    // Mark remaining ports dirty
+    for (const port of ports) {
+      if (!portPreviewCanvases.has(port)) portDirty.add(port);
+    }
+
+    renderPorts();
+    drawOverlay();
+    updateLinePreviews();
+    renderOutputSection();
+  }, setStatus);
 }
 
 // ------------------------------------------------------------------ //
