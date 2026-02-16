@@ -148,21 +148,6 @@ export function render() {
       label.className = "port-label";
       label.textContent = `Port ${pi}`;
 
-      const ledsLabel = document.createElement("label");
-      ledsLabel.textContent = "LEDs";
-
-      const ledsInput = document.createElement("input");
-      ledsInput.type = "number";
-      ledsInput.min = "1";
-      ledsInput.max = "400";
-      ledsInput.value = port.leds;
-      ledsInput.addEventListener("change", () => {
-        port.leds = Math.max(1, Math.min(400, parseInt(ledsInput.value) || 1));
-        ledsInput.value = port.leds;
-        A.updateLinePreviews();
-        A.markPortDirty(port);
-      });
-
       const selectAllBtn = document.createElement("button");
       selectAllBtn.className = "btn-small";
       selectAllBtn.textContent = "Select All";
@@ -181,21 +166,20 @@ export function render() {
         A.drawOverlay();
       });
 
-      const isDirty = S.portDirty.has(port);
       const isProcessing = S.portPreviewProcessing.has(port);
       const progress = S.portPreviewProcessing.get(port);
 
       const renderBtn = document.createElement("button");
       renderBtn.className = "btn-small";
       renderBtn.textContent = isProcessing ? `Rendering ${progress.frame}/${progress.total}` : "Render";
-      renderBtn.disabled = !isDirty || isProcessing;
+      renderBtn.disabled = isProcessing;
       renderBtn.addEventListener("click", () => {
         renderBtn.textContent = "Rendering\u2026";
         renderBtn.disabled = true;
         A.processPortPreview(port);
       });
 
-      header.append(toggle, dot, label, ledsLabel, ledsInput, selectAllBtn, renderBtn, removeBtn);
+      header.append(toggle, dot, label, selectAllBtn, renderBtn, removeBtn);
       div.appendChild(header);
 
       // Line preview strip (always visible)
@@ -277,8 +261,32 @@ export function render() {
         div.appendChild(prevSection);
       }
 
-      // Collapsible body: trim + points/save-load
+      // Collapsible body: LEDs + trim + points/save-load
       if (!isCollapsed) {
+        // LED count
+        const ledsRow = document.createElement("div");
+        ledsRow.className = "point-actions";
+        ledsRow.style.display = "flex";
+        ledsRow.style.gap = "8px";
+        ledsRow.style.alignItems = "center";
+
+        const ledsLabel = document.createElement("label");
+        ledsLabel.textContent = "LEDs";
+        const ledsInput = document.createElement("input");
+        ledsInput.type = "number";
+        ledsInput.min = "1";
+        ledsInput.max = "400";
+        ledsInput.value = port.leds;
+        ledsInput.addEventListener("change", () => {
+          port.leds = Math.max(1, Math.min(400, parseInt(ledsInput.value) || 1));
+          ledsInput.value = port.leds;
+          A.updateLinePreviews();
+          A.markPortDirty(port);
+        });
+
+        ledsRow.append(ledsLabel, ledsInput);
+        div.appendChild(ledsRow);
+
         // Trim start/end
         const trimRow = document.createElement("div");
         trimRow.className = "point-actions";
