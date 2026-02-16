@@ -82,7 +82,7 @@ export async function deserializeScene(text, fileMap, setStatus) {
     const controller = { ports: [], collapsed: ctrl.collapsed ?? false };
     for (const portData of ctrl.ports) {
       const port = {
-        leds: portData.leds ?? 400,
+        leds: Math.min(512, portData.leds ?? 400),
         trimStart: portData.trimStart ?? 0,
         trimEnd: portData.trimEnd ?? 0,
         points: (portData.points || []).map((p) => ({ x: p.x, y: p.y })),

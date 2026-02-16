@@ -1027,12 +1027,8 @@ async function updateLinePreviews() {
     const canvas = rack.getLinePreviewCanvases().get(pi);
     if (!canvas) return;
 
-    // Resize if LED count changed
-    if (canvas.width !== port.leds) {
-      canvas.width = port.leds;
-    }
-
     const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, 512, 1);
     const samples = samplePortLine(sampleCtx, port);
     const imgData = ctx.createImageData(port.leds, 1);
     for (let p = 0; p < port.leds; p++) {
@@ -1096,9 +1092,10 @@ async function processPortPreview(port) {
     const captureCtx = captureCanvas.getContext("2d", { willReadFrequently: true });
 
     const prevCanvas = document.createElement("canvas");
-    prevCanvas.width = port.leds;
+    prevCanvas.width = 512;
     prevCanvas.height = totalFrames;
     const prevCtx = prevCanvas.getContext("2d");
+    prevCtx.clearRect(0, 0, 512, totalFrames);
 
     for (let f = 0; f < totalFrames; f++) {
       if (!ports.includes(port)) break;
@@ -1167,9 +1164,11 @@ async function processMultiPortPreviews(portsToRender) {
 
     const portData = portsToRender.map((port) => {
       const prevCanvas = document.createElement("canvas");
-      prevCanvas.width = port.leds;
+      prevCanvas.width = 512;
       prevCanvas.height = totalFrames;
-      return { port, prevCanvas, prevCtx: prevCanvas.getContext("2d") };
+      const prevCtx = prevCanvas.getContext("2d");
+      prevCtx.clearRect(0, 0, 512, totalFrames);
+      return { port, prevCanvas, prevCtx };
     });
 
     for (let f = 0; f < totalFrames; f++) {

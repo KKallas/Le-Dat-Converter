@@ -186,7 +186,7 @@ export function render() {
       const lineCanvas = document.createElement("canvas");
       lineCanvas.className = "line-preview";
       lineCanvas.height = 1;
-      lineCanvas.width = port.leds;
+      lineCanvas.width = 512;
       div.appendChild(lineCanvas);
       linePreviewCanvases.set(globalIdx, lineCanvas);
 
@@ -275,10 +275,10 @@ export function render() {
         const ledsInput = document.createElement("input");
         ledsInput.type = "number";
         ledsInput.min = "1";
-        ledsInput.max = "400";
+        ledsInput.max = "512";
         ledsInput.value = port.leds;
         ledsInput.addEventListener("change", () => {
-          port.leds = Math.max(1, Math.min(400, parseInt(ledsInput.value) || 1));
+          port.leds = Math.max(1, Math.min(512, parseInt(ledsInput.value) || 1));
           ledsInput.value = port.leds;
           A.updateLinePreviews();
           A.markPortDirty(port);
