@@ -586,3 +586,31 @@ button:disabled {
   background: #2a2a4a;
   border-radius: 3px;
 }
+
+/* -- viewer toolbar (floating inside viewport) -- */
+
+.viewer-toolbar {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(22, 33, 62, 0.85);
+  border-radius: 6px;
+  border: 1px solid #2a2a4a;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.viewer-toolbar.hidden {
+  display: none;
+}
+
+.viewport-hint {
+  font-size: 0.7rem;
+  color: #666;
+  margin: 4px 0 0 0;
+  font-style: italic;
+}

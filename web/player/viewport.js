@@ -25,6 +25,9 @@ let _panStartPanY = 0;
 let _onChange = null;
 let _rafPending = false;
 
+/** Optional mode check — when set, built-in scroll/middle-click only work when allowed */
+let _getModeAllowed = null;
+
 function _notifyChange() {
   if (!_onChange || _rafPending) return;
   _rafPending = true;
@@ -38,8 +41,9 @@ export function init(canvas, wrap) {
   _canvas = canvas;
   _wrap = wrap;
 
-  // Zoom with scroll wheel
+  // Zoom with scroll wheel (only when mode allows)
   wrap.addEventListener("wheel", (e) => {
+    if (_getModeAllowed && !_getModeAllowed("wheel")) return;
     e.preventDefault();
     const rect = wrap.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -55,9 +59,10 @@ export function init(canvas, wrap) {
     _notifyChange();
   }, { passive: false });
 
-  // Pan with middle mouse button
+  // Pan with middle mouse button (only when mode allows)
   wrap.addEventListener("mousedown", (e) => {
     if (e.button === 1) { // middle click
+      if (_getModeAllowed && !_getModeAllowed("middle")) return;
       e.preventDefault();
       _panning = true;
       _panStartX = e.clientX;
@@ -221,8 +226,38 @@ export function resetView() {
   zoom = 1;
 }
 
+/** Programmatic pan setter (used by viewer toolbar pan mode). */
+export function setPan(x, y) { panX = x; panY = y; _notifyChange(); }
+
+/** Programmatic zoom setter (used by viewer toolbar zoom mode). */
+export function setZoom(z) { zoom = Math.max(0.1, Math.min(20, z)); _notifyChange(); }
+
+/**
+ * Zoom to fit a bounding box (media coords) within the canvas.
+ * @param {{ minX: number, minY: number, maxX: number, maxY: number }} bbox
+ * @param {number} canvasW — canvas pixel width
+ * @param {number} canvasH — canvas pixel height
+ */
+export function zoomToFit(bbox, canvasW, canvasH) {
+  const bw = bbox.maxX - bbox.minX || 100;
+  const bh = bbox.maxY - bbox.minY || 100;
+  const pad = 1.2;
+  zoom = Math.min(canvasW / (bw * pad), canvasH / (bh * pad));
+  const cx = (bbox.minX + bbox.maxX) / 2;
+  const cy = (bbox.minY + bbox.maxY) / 2;
+  panX = canvasW / 2 - cx * zoom;
+  panY = canvasH / 2 - cy * zoom;
+  _notifyChange();
+}
+
 /** Set a callback invoked whenever pan/zoom changes. */
 export function setOnChange(cb) { _onChange = cb; }
+
+/**
+ * Set a mode check callback. Called with "wheel" or "middle" —
+ * return true to allow built-in scroll-zoom / middle-click-pan.
+ */
+export function setModeCheck(cb) { _getModeAllowed = cb; }
 
 /**
  * Apply the pan/zoom transform to a canvas context before drawing.

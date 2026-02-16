@@ -1,6 +1,7 @@
 import { samplePolyline as _samplePolyline, samplePortLine as _samplePortLine } from "./renderer/sampling.js";
 import * as player from "./player/player.js";
 import * as viewport from "./player/viewport.js";
+import * as viewerToolbar from "./player/viewer-toolbar.js";
 import * as rack from "./rack/rack.js";
 import * as toolbar from "./tools/toolbar.js";
 import { saveScene as _saveScene } from "./scene/save.js";
@@ -219,6 +220,44 @@ viewport.setOnChange(() => drawOverlay());
 viewport.setKeyboardCallbacks({
   stepForward: () => player.stepForward(),
   stepBack: () => player.stepBack(),
+});
+
+// Scroll-wheel zoom only in zoom mode, middle-click pan only in pan mode
+viewport.setModeCheck((type) => {
+  const mode = viewerToolbar.getMode();
+  if (type === "wheel") return mode === "zoom";
+  if (type === "middle") return mode === "pan";
+  return true;
+});
+
+viewerToolbar.init(videoWrap, {
+  onHome() {
+    viewport.resetView();
+    drawOverlay();
+  },
+  onSelected() {
+    // If points are selected, zoom to fit them; otherwise zoom to fit all points
+    let pts = getSelectedPointObjects();
+    if (pts.length === 0) {
+      // Gather all points from all ports
+      pts = [];
+      ports.forEach((port, pi) => {
+        port.points.forEach((pt, pti) => {
+          pts.push({ portIdx: pi, pointIdx: pti, point: pt });
+        });
+      });
+    }
+    if (pts.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      if (p.point.x < minX) minX = p.point.x;
+      if (p.point.y < minY) minY = p.point.y;
+      if (p.point.x > maxX) maxX = p.point.x;
+      if (p.point.y > maxY) maxY = p.point.y;
+    }
+    viewport.zoomToFit({ minX, minY, maxX, maxY }, overlay.width, overlay.height);
+    drawOverlay();
+  },
 });
 
 player.init(playerState, {
@@ -1231,8 +1270,58 @@ let pointerDownPos = null; // media coords at press
 const DRAG_THRESHOLD = 5; // px in media coords before drag starts
 let _draggingTransformControl = false; // true when dragging a toolbar transform handle
 
+// Viewer toolbar: pan/zoom mode drag state
+let _viewerPanning = false;
+let _viewerPanStart = null; // { clientX, clientY, panX, panY }
+let _viewerZooming = false;
+let _viewerZoomStart = null; // { clientY, zoom }
+
+// Triple-click detection
+const _clickTimes = [];
+const TRIPLE_CLICK_WINDOW = 500; // ms
+
+function _checkTripleClick() {
+  const now = Date.now();
+  _clickTimes.push(now);
+  // Keep only last 3
+  while (_clickTimes.length > 3) _clickTimes.shift();
+  if (_clickTimes.length === 3 && now - _clickTimes[0] < TRIPLE_CLICK_WINDOW) {
+    _clickTimes.length = 0;
+    viewerToolbar.toggle();
+    return true;
+  }
+  return false;
+}
+
 function onPointerDown(e) {
   if (!mediaReady || viewport.isPanning()) return;
+
+  // Triple-click detection
+  if (_checkTripleClick()) return;
+
+  const mode = viewerToolbar.getMode();
+
+  // Pan mode: start left-click pan
+  if (mode === "pan") {
+    const touch = e.touches?.[0];
+    const clientX = touch ? touch.clientX : e.clientX;
+    const clientY = touch ? touch.clientY : e.clientY;
+    const pan = viewport.getPan();
+    _viewerPanning = true;
+    _viewerPanStart = { clientX, clientY, panX: pan.x, panY: pan.y };
+    return;
+  }
+
+  // Zoom mode: start left-click zoom drag
+  if (mode === "zoom") {
+    const touch = e.touches?.[0];
+    const clientY = touch ? touch.clientY : e.clientY;
+    _viewerZooming = true;
+    _viewerZoomStart = { clientY, zoom: viewport.getZoom() };
+    return;
+  }
+
+  // Points mode: existing behavior
   pointerDown = true;
   _draggingTransformControl = false;
   pointerDownPos = getMediaCoords(e);
@@ -1258,6 +1347,31 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
+  // Viewer pan mode
+  if (_viewerPanning && _viewerPanStart) {
+    const touch = e.touches?.[0];
+    const clientX = touch ? touch.clientX : e.clientX;
+    const clientY = touch ? touch.clientY : e.clientY;
+    const cssScaleX = overlay.width / videoWrap.getBoundingClientRect().width;
+    const cssScaleY = overlay.height / videoWrap.getBoundingClientRect().height;
+    viewport.setPan(
+      _viewerPanStart.panX + (clientX - _viewerPanStart.clientX) * cssScaleX,
+      _viewerPanStart.panY + (clientY - _viewerPanStart.clientY) * cssScaleY,
+    );
+    drawOverlay();
+    return;
+  }
+
+  // Viewer zoom mode
+  if (_viewerZooming && _viewerZoomStart) {
+    const touch = e.touches?.[0];
+    const clientY = touch ? touch.clientY : e.clientY;
+    const dy = _viewerZoomStart.clientY - clientY; // up = positive = zoom in
+    viewport.setZoom(_viewerZoomStart.zoom * (1 + dy * 0.005));
+    drawOverlay();
+    return;
+  }
+
   if (!pointerDown || viewport.isPanning()) return;
 
   // Start drag only after moving past threshold
@@ -1286,6 +1400,10 @@ function onPointerMove(e) {
 }
 
 function onPointerUp() {
+  // Viewer pan/zoom cleanup
+  if (_viewerPanning) { _viewerPanning = false; _viewerPanStart = null; return; }
+  if (_viewerZooming) { _viewerZooming = false; _viewerZoomStart = null; return; }
+
   pointerDown = false;
   pointerDownPos = null;
   if (!dragging) return;
@@ -1298,9 +1416,10 @@ function onPointerUp() {
   renderPorts();
 }
 
-/** Double-click / double-tap: select closest point */
+/** Double-click / double-tap: select closest point (only in points mode) */
 function onDblSelect(e) {
   if (!mediaReady) return;
+  if (viewerToolbar.getMode() !== "points") return;
   e.preventDefault();
   const { x, y } = getMediaCoords(e);
   const closest = findClosestPoint(x, y);
