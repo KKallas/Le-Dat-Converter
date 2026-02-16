@@ -89,8 +89,6 @@ export async function deserializeScene(text, fileMap, setStatus) {
         collapsed: portData.collapsed ?? false,
         previewCollapsed: portData.previewCollapsed ?? true,
         editMode: portData.editMode ?? "points",
-        savedPoints: null,
-        transformState: null,
       };
       controller.ports.push(port);
       portDataList.push(portData);

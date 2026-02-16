@@ -2,13 +2,9 @@
 // Rack — controller/port sidebar UI
 // ------------------------------------------------------------------ //
 
-import pointsTool from "../tools/points/tool.js";
-import saveloadTool from "../tools/saveload/tool.js";
+import controllerTools from "../tools/controller/registry.js";
 
-const TOOLS = {
-  points: pointsTool,
-  saveload: saveloadTool,
-};
+const TOOLS = Object.fromEntries(controllerTools.map(t => [t.name, t]));
 
 const PORT_COLORS = [
   "#e94560", "#00ff88", "#00aaff", "#ffaa00",
@@ -328,11 +324,11 @@ export function render() {
         modeRow.className = "point-actions";
         const modeSelect = document.createElement("select");
         modeSelect.className = "edit-mode-select";
-        for (const [val, lbl] of [["points", "Points"], ["saveload", "Save/Load"]]) {
+        for (const t of controllerTools) {
           const opt = document.createElement("option");
-          opt.value = val;
-          opt.textContent = lbl;
-          if (port.editMode === val) opt.selected = true;
+          opt.value = t.name;
+          opt.textContent = t.label;
+          if (port.editMode === t.name) opt.selected = true;
           modeSelect.appendChild(opt);
         }
         modeSelect.addEventListener("change", () => {
@@ -342,8 +338,8 @@ export function render() {
         modeRow.appendChild(modeSelect);
         div.appendChild(modeRow);
 
-        // Render tool panel (Points or Save/Load)
-        const tool = TOOLS[port.editMode] || TOOLS.points;
+        // Render tool panel
+        const tool = TOOLS[port.editMode] || controllerTools[0];
         if (tool && tool.renderPanel) {
           tool.renderPanel(div, port, globalIdx, _buildToolAPI(port, globalIdx));
         }

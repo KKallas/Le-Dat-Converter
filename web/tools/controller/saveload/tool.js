@@ -2,7 +2,7 @@
 // Save/Load tool — copy/paste normalized coordinates
 // ------------------------------------------------------------------ //
 
-import { parseSaveLoadText } from "../../rack/port-model.js";
+import { parseSaveLoadText } from "../../../rack/port-model.js";
 
 export default {
   name: "saveload",

@@ -1,6 +1,4 @@
 import { samplePolyline as _samplePolyline, samplePortLine as _samplePortLine } from "./renderer/sampling.js";
-import { state } from "./core/state.js";
-import { bus } from "./core/events.js";
 import * as player from "./player/player.js";
 import * as viewport from "./player/viewport.js";
 import * as rack from "./rack/rack.js";
@@ -11,8 +9,6 @@ import { doExport as _doExport } from "./output/export.js";
 import {
   rebuildPortsList as _rebuildPorts, createController, createPort,
   firstFlatIndex, addPointToPort as _addPoint, removePointFromPort as _removePoint,
-  enterTransformMode as _enterTransform, applyTransform as _applyTransform,
-  cancelTransform as _cancelTransform, computeTransformedPoints, getTransformControlPoints,
 } from "./rack/port-model.js";
 
 // ------------------------------------------------------------------ //
@@ -47,8 +43,7 @@ const DRAG_INTERVAL = 20; // ~50fps throttle for drag updates
 
 /**
  * @typedef {{ x: number, y: number }} Point
- * @typedef {{ center: Point, pivot: Point, offset: Point, angle: number, scaleX: number, scaleY: number, baseRadius: number }} TransformState
- * @typedef {{ leds: number, trimStart: number, trimEnd: number, points: Point[], collapsed: boolean, previewCollapsed: boolean, editMode: string, savedPoints: Point[]|null, transformState: TransformState|null }} Port
+ * @typedef {{ leds: number, trimStart: number, trimEnd: number, points: Point[], collapsed: boolean, previewCollapsed: boolean, editMode: string }} Port
  * @typedef {{ ports: Port[], collapsed: boolean }} Controller
  */
 
@@ -562,11 +557,6 @@ function removePointFromPort(portIdx, pointIdx) {
   }
   toolbar.renderPanel();
 }
-
-// Transform mode (delegates to rack/port-model.js)
-function enterTransformMode(port) { _enterTransform(port, mediaW, mediaH); }
-function applyTransform(port) { _applyTransform(port); markPortDirty(port); }
-function cancelTransform(port) { _cancelTransform(port); }
 
 // ------------------------------------------------------------------ //
 // Output section UI (foldable card)
@@ -1196,7 +1186,7 @@ function getMediaCoords(e) {
 
 function moveActivePoint(x, y) {
   // When toolbar transform is active, delegate dragging to toolbar
-  if (toolbar.isTransformActive() && _draggingTransformControl) {
+  if (toolbar.isToolActive() && _draggingTransformControl) {
     toolbar.moveControl(x, y);
     return;
   }
@@ -1214,7 +1204,7 @@ function findClosestPoint(mx, my) {
   let bestDist = Infinity;
 
   // When toolbar transform is active, check transform control handles first
-  if (toolbar.isTransformActive()) {
+  if (toolbar.isToolActive()) {
     const controls = toolbar.getControlPoints();
     if (controls) {
       for (const cp of controls) {
@@ -1248,7 +1238,7 @@ function onPointerDown(e) {
   pointerDownPos = getMediaCoords(e);
 
   // If toolbar transform is active, check if clicking a control handle
-  if (toolbar.isTransformActive()) {
+  if (toolbar.isToolActive()) {
     const { x, y } = pointerDownPos;
     const controls = toolbar.getControlPoints();
     if (controls) {
@@ -1327,8 +1317,8 @@ function onDblSelect(e) {
 
 /** Fast update of only the active row's input values during drag */
 function updateActiveCoords() {
-  if (_draggingTransformControl && toolbar.isTransformActive()) {
-    const s = toolbar.getTransformState();
+  if (_draggingTransformControl && toolbar.isToolActive()) {
+    const s = toolbar.getToolState();
     if (!s) return;
     const inputMap = {
       "Offset": [Math.round(s.offset.x), Math.round(s.offset.y)],
@@ -1406,7 +1396,7 @@ async function drawOverlay() {
 
 /** Draw port polylines and control points on the overlay (no background clear/draw) */
 function drawOverlayPorts() {
-  const transformActive = toolbar.isTransformActive();
+  const transformActive = toolbar.isToolActive();
   const savedPositions = transformActive ? toolbar.getSavedPositions() : null;
 
   // When transform is active, draw ghost (original) positions for affected ports

@@ -65,7 +65,7 @@ The web app is organized into modular ES modules:
 
 - **Rack sidebar** (left panel) — controller/port hierarchy, per-port point editing (Points tool), coordinate save/load (Save/Load tool), LED count, trim, render previews
 - **Viewport** (right panel) — media display with overlay canvas, pan/zoom, polyline visualization
-- **Transform toolbar** (below viewport) — operates on multi-selected points across ports/controllers with offset, pivot, rotate, and scale controls
+- **Scene toolbar** (below viewport) — pluggable scene tools operating on multi-selected points across ports/controllers (e.g. Transform: offset, pivot, rotate, scale)
 
 ### Hosting on ESP32
 
@@ -75,11 +75,11 @@ The web app is pure static files with zero external dependencies. To serve it fr
    - `web/index.html`
    - `web/app.js`
    - `web/style.css`
-   - `web/core/` — `state.js`, `events.js`, `utils.js`
+   - `web/core/` — `utils.js`
    - `web/player/` — `player.js`, `viewport.js`
-   - `web/rack/` — `rack.js`, `port-model.js`, `selection.js`
+   - `web/rack/` — `rack.js`, `port-model.js`
    - `web/renderer/` — `sampling.js`
-   - `web/tools/` — `toolbar.js`, `points/tool.js`, `saveload/tool.js`, `transform/tool.js`
+   - `web/tools/` — `toolbar.js`, `controller/registry.js`, `controller/points/tool.js`, `controller/saveload/tool.js`, `scene/registry.js`, `scene/transform/tool.js`
    - `web/scene/` — `save.js`, `load.js`
    - `web/output/` — `export.js`
    - `js/datfile.js`
@@ -187,29 +187,32 @@ Le-Dat-Converter/
     app.js                  # bootstrap: imports modules, wires state & actions
     style.css               # all styling
     core/
-      state.js              # central state store
-      events.js             # event bus
       utils.js              # zip, crc32, download helpers
+      state.js              # (unused) central state store with pub/sub
+      events.js             # (unused) event bus for cross-module communication
     player/
       player.js             # playback: play/pause/stop/seek, frame extraction
       viewport.js           # overlay canvas, pan/zoom, coordinate transforms
     rack/
       rack.js               # controller/port sidebar UI
       port-model.js         # port/controller CRUD + data structures
-      selection.js          # (reserved for future selection logic)
     renderer/
       sampling.js           # samplePolyline, samplePortLine math
     tools/
-      toolbar.js            # Transform toolbar UI (below viewport)
-      points/
-        tool.js             # point editing panel (per-port in rack sidebar)
-        howto.md
-      saveload/
-        tool.js             # copy/paste normalized coordinates (per-port)
-        howto.md
-      transform/
-        tool.js             # (legacy per-port transform, superseded by toolbar.js)
-        howto.md
+      toolbar.js            # generic scene tool host (below viewport)
+      controller/           # per-port tools (rack sidebar dropdown)
+        registry.js         # imports & exports all controller tools
+        points/
+          tool.js           # point editing panel
+          howto.md
+        saveload/
+          tool.js           # copy/paste normalized coordinates
+          howto.md
+      scene/                # global tools (toolbar below viewport)
+        registry.js         # imports & exports all scene tools
+        transform/
+          tool.js           # offset/pivot/rotate/scale selected points
+          howto.md
     scene/
       save.js               # serialize scene + zip
       load.js               # parse zip + deserialize scene

@@ -17,6 +17,22 @@ The default tool for editing polyline control points on each port. Shown in the 
 
 Selected points are shown with a cyan highlight ring on the viewport and a blue border in the sidebar. Multi-selected points can be transformed together using the Transform toolbar below the viewport.
 
+## Plugin Contract
+
+This is a **controller tool** — it operates on a single port's polyline in the rack sidebar.
+
+Controller tools live in `tools/controller/<name>/tool.js` and export:
+
+```javascript
+export default {
+  name: "points",
+  label: "Points",
+  renderPanel(container, port, portIdx, api) { ... }
+};
+```
+
+To register a new controller tool, add it to `tools/controller/registry.js`.
+
 ## Tips
 
 - Points are labeled A, B, C... matching the sidebar list
