@@ -236,11 +236,11 @@ export function render() {
 
           const xAxis = document.createElement("div");
           xAxis.className = "preview-x-axis";
-          const xStep = leds <= 100 ? 25 : leds <= 200 ? 50 : 100;
-          for (let led = 0; led <= leds; led += xStep) {
+          const xStep = 100;
+          for (let led = 0; led <= 512; led += xStep) {
             const tick = document.createElement("span");
             tick.textContent = led;
-            tick.style.left = (led / leds * 100) + "%";
+            tick.style.left = (led / 512 * 100) + "%";
             xAxis.appendChild(tick);
           }
 

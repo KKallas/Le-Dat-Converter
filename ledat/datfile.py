@@ -2,13 +2,29 @@
 DAT file writer for H803TC / H801RC / H802RA LED controllers.
 
 Generates .dat files compatible with LEDBuild software and Huacan LED
-controller hardware. The binary format uses a 512-byte header followed
-by frame data in BGR pixel order, padded to a 512-byte boundary.
+controller hardware.
+
+Format: 512-byte header, then frames padded to 512-byte boundaries.
+Each frame uses groups of (8 × controllerCount) bytes. Each LED uses
+3 consecutive groups for B, G, R channels. Within each controller's
+8-byte block, port N maps to byte position (8 - N).
+
+Multi-controller: universes 0-7 → controller 1, 8-15 → controller 2, etc.
 """
 
+import math
 import os
 import numpy as np
 from typing import Optional
+
+
+PORTS_PER_CONTROLLER = 8
+
+# Gamma 2.2 lookup table
+GAMMA_LUT = np.array(
+    [round(pow(i / 255.0, 2.2) * 255.0) for i in range(256)],
+    dtype=np.uint8,
+)
 
 
 class DATFile:
@@ -17,14 +33,14 @@ class DATFile:
 
     File structure:
         - Header: 512 bytes (magic + config, mostly zeros)
-        - Frame data: (total_pixels * 3) bytes per frame, BGR order
-        - Padding: zeros to align to 512-byte boundary
+        - Frame data: interleaved groups, BGR channel order
+        - Each frame padded to 512-byte boundary
 
     Usage::
 
         dat = DATFile()
-        dat.add_universe(400)
-        dat.add_universe(400)
+        dat.add_universe(400)   # universe 0 = ctrl 1, port 1
+        dat.add_universe(400)   # universe 1 = ctrl 1, port 2
         dat.set_num_frames(60)
         dat.set_pixel(universe=0, frame=0, pixel=0, r=255, g=0, b=0)
         dat.write("output.dat")  # also writes output.txt
@@ -78,7 +94,7 @@ class DATFile:
 
     @property
     def num_universes(self) -> int:
-        """Number of universes."""
+        """Number of universes (ports)."""
         return len(self._universes)
 
     @property
@@ -91,6 +107,23 @@ class DATFile:
         """Total pixels across all universes."""
         return sum(self._universes)
 
+    @property
+    def max_leds_per_port(self) -> int:
+        """Max LEDs across all universes (determines frame group count)."""
+        return max(self._universes) if self._universes else 0
+
+    @property
+    def controller_count(self) -> int:
+        """Number of H801RC controllers needed (each has 8 ports)."""
+        if not self._universes:
+            return 1
+        return math.ceil(len(self._universes) / PORTS_PER_CONTROLLER)
+
+    @property
+    def group_size(self) -> int:
+        """Group size in bytes: 8 per controller."""
+        return PORTS_PER_CONTROLLER * self.controller_count
+
     def universe_leds(self, universe: int) -> int:
         """LED count for a specific universe."""
         return self._universes[universe]
@@ -99,7 +132,7 @@ class DATFile:
 
     def add_universe(self, num_leds: int) -> int:
         """
-        Add a universe with *num_leds* LEDs.
+        Add a universe (port) with *num_leds* LEDs.
 
         Returns:
             The 0-based universe index.
@@ -140,7 +173,7 @@ class DATFile:
 
     def set_pixel(self, universe: int, frame: int, pixel: int,
                   r: int, g: int, b: int) -> None:
-        """Set a single pixel's RGB colour."""
+        """Set a single pixel's RGB colour (linear, before gamma)."""
         self._check_indices(universe, frame, pixel)
         self._pixel_data[universe][frame, pixel] = [r, g, b]
 
@@ -210,11 +243,13 @@ class DATFile:
             with open(tpl, "rb") as tf:
                 template_header = tf.read(self.HEADER_SIZE)
 
+        max_leds = self.max_leds_per_port
+        grp_size = self.group_size
+        frame_bytes = max_leds * 3 * grp_size
+        frame_pad = (512 - frame_bytes % 512) % 512
+
         with open(filename, "wb") as f:
             f.write(self._build_header(template_header))
-
-            frame_bytes = self.total_pixels * 3
-            frame_pad = (512 - frame_bytes % 512) % 512
 
             for idx in range(self._num_frames):
                 f.write(self._build_frame(idx))
@@ -252,10 +287,13 @@ class DATFile:
             )
 
     def _build_header(self, template_header: Optional[bytes] = None) -> bytes:
+        """Build the 512-byte header. Byte 16-17 = controller/slave count."""
+        ctrl_count = self.controller_count
+
         if template_header is not None:
             hdr = bytearray(template_header[:self.HEADER_SIZE])
-            hdr[16] = self.num_universes & 0xFF
-            hdr[17] = (self.num_universes >> 8) & 0xFF
+            hdr[16] = ctrl_count & 0xFF
+            hdr[17] = (ctrl_count >> 8) & 0xFF
             return bytes(hdr)
 
         for key, hdr in self.KNOWN_HEADERS.items():
@@ -268,8 +306,8 @@ class DATFile:
             0x40, 0x40, 0x0A, 0x60, 0x40, 0x4A, 0x0A, 0x60,
             0x04, 0x08, 0x50, 0x32,
         ])
-        hdr[16] = self.num_universes & 0xFF
-        hdr[17] = (self.num_universes >> 8) & 0xFF
+        hdr[16] = ctrl_count & 0xFF
+        hdr[17] = (ctrl_count >> 8) & 0xFF
         hdr[18:70] = bytes([
             0xB3, 0x2F, 0x76, 0x45, 0x28, 0x02, 0x83, 0xAC,
             0xE3, 0x00, 0x04, 0xDF, 0x67, 0x43, 0x11, 0x40,
@@ -282,14 +320,40 @@ class DATFile:
         return bytes(hdr)
 
     def _build_frame(self, frame_idx: int) -> bytes:
-        buf = bytearray(self.total_pixels * 3)
-        offset = 0
+        """
+        Build one frame with interleaved groups and BGR channel order.
+
+        Group size = 8 × controllerCount. Each LED uses 3 consecutive groups
+        (B, G, R). Within each controller's 8-byte block, port N (1-based
+        within that controller) maps to byte position (8 - N).
+
+        Universe uid maps to: controller = uid // 8, local port = (uid % 8) + 1,
+        byte offset within group = controller * 8 + (7 - uid % 8).
+
+        Values are gamma-corrected (gamma 2.2) before writing.
+        """
+        max_leds = self.max_leds_per_port
+        grp_size = self.group_size
+        frame_bytes = max_leds * 3 * grp_size
+        buf = bytearray(frame_bytes)
+
         for uid in range(self.num_universes):
-            rgb = self._pixel_data[uid][frame_idx]
-            bgr = rgb[:, ::-1]
-            b = bgr.tobytes()
-            buf[offset:offset + len(b)] = b
-            offset += self._universes[uid] * 3
+            num_leds = self._universes[uid]
+            rgb = self._pixel_data[uid][frame_idx]  # (num_leds, 3)
+            # controller index × 8 + (7 - local port index)
+            ctrl_idx = uid // PORTS_PER_CONTROLLER
+            local_port = uid % PORTS_PER_CONTROLLER
+            byte_pos = ctrl_idx * PORTS_PER_CONTROLLER + (7 - local_port)
+
+            for led in range(num_leds):
+                r, g, b = int(rgb[led, 0]), int(rgb[led, 1]), int(rgb[led, 2])
+
+                # 3 groups per LED: B, G, R (each group is grp_size bytes)
+                group_base = led * 3 * grp_size
+                buf[group_base + byte_pos] = GAMMA_LUT[b]                          # B group
+                buf[group_base + grp_size + byte_pos] = GAMMA_LUT[g]               # G group
+                buf[group_base + 2 * grp_size + byte_pos] = GAMMA_LUT[r]           # R group
+
         return bytes(buf)
 
     def __repr__(self) -> str:

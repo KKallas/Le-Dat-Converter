@@ -2,20 +2,26 @@
  * DAT file writer for H803TC / H801RC / H802RA LED controllers.
  *
  * Generates .dat blobs compatible with LEDBuild software and Huacan LED
- * controller hardware. The binary format uses a 512-byte header followed
- * by frame data in BGR pixel order, each frame padded to a 512-byte boundary.
+ * controller hardware.
+ *
+ * Format: 512-byte header, then frames padded to 512-byte boundaries.
+ * Each frame uses groups of (8 × controllerCount) bytes. Each LED uses
+ * 3 consecutive groups for B, G, R channels. Within each controller's
+ * 8-byte block, port N maps to byte position (8 - N).
+ *
+ * Multi-controller: universes 0–7 → controller 1, 8–15 → controller 2, etc.
  *
  * @example
  *   const dat = new DATFile();
- *   dat.addUniverse(400);
- *   dat.addUniverse(400);
+ *   dat.addUniverse(400);   // universe 0 = ctrl 1, port 1
+ *   dat.addUniverse(400);   // universe 1 = ctrl 1, port 2
  *   dat.setNumFrames(60);
  *   dat.setPixel(0, 0, 0, 255, 0, 0);
- *   const blob = dat.toBlob();        // Blob ready for download
- *   const txt  = dat.toTxt();         // human-readable summary string
+ *   const blob = dat.toBlob();
  */
 
 const HEADER_SIZE = 512;
+const PORTS_PER_CONTROLLER = 8;
 
 const MAGIC = new Uint8Array([0x00, 0x00, 0x48, 0x43]); // "HC"
 
@@ -34,9 +40,15 @@ const EXTENDED_CONFIG = new Uint8Array([
   0x52, 0x70, 0x50, 0x55,
 ]);
 
+// Gamma 2.2 lookup table
+const GAMMA_LUT = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  GAMMA_LUT[i] = Math.round(Math.pow(i / 255, 2.2) * 255);
+}
+
 export class DATFile {
   constructor() {
-    /** @type {number[]} LED count per universe */
+    /** @type {number[]} LED count per universe (universe = port) */
     this._universes = [];
     /** @type {number} */
     this._numFrames = 0;
@@ -67,6 +79,23 @@ export class DATFile {
     return sum;
   }
 
+  /** Max LEDs across all universes (determines frame group count). */
+  get maxLedsPerPort() {
+    let max = 0;
+    for (const n of this._universes) if (n > max) max = n;
+    return max;
+  }
+
+  /** Number of H801RC controllers needed (each has 8 ports). */
+  get controllerCount() {
+    return Math.ceil(this._universes.length / PORTS_PER_CONTROLLER) || 1;
+  }
+
+  /** Group size in bytes: 8 per controller. */
+  get groupSize() {
+    return PORTS_PER_CONTROLLER * this.controllerCount;
+  }
+
   universeLeds(universe) {
     return this._universes[universe];
   }
@@ -85,7 +114,7 @@ export class DATFile {
   // -- building the animation ------------------------------------------- //
 
   /**
-   * Add a universe with the given number of LEDs.
+   * Add a universe (port) with the given number of LEDs.
    * @param {number} numLeds
    * @returns {number} The 0-based universe index.
    */
@@ -124,7 +153,7 @@ export class DATFile {
   }
 
   /**
-   * Set a single pixel's RGB colour.
+   * Set a single pixel's RGB colour (linear, before gamma).
    * @param {number} universe
    * @param {number} frame
    * @param {number} pixel
@@ -164,19 +193,23 @@ export class DATFile {
    */
   clear() {
     this._numFrames = 0;
-    this._pixelData = this._universes.map((n) => new Uint8Array(0));
+    this._pixelData = this._universes.map(() => new Uint8Array(0));
   }
 
   // -- output ----------------------------------------------------------- //
 
   /**
    * Build the full .dat file as a Uint8Array.
+   *
+   * Frame size = maxLedsPerPort * 3 * groupSize, padded to 512-byte boundary.
    * @returns {Uint8Array}
    */
   toUint8Array() {
     const header = this._buildHeader();
 
-    const frameBytes = this.totalPixels * 3;
+    const maxLeds = this.maxLedsPerPort;
+    const grpSize = this.groupSize;
+    const frameBytes = maxLeds * 3 * grpSize;
     const framePad = (512 - (frameBytes % 512)) % 512;
     const paddedFrame = frameBytes + framePad;
 
@@ -188,7 +221,6 @@ export class DATFile {
     for (let idx = 0; idx < this._numFrames; idx++) {
       const frameData = this._buildFrame(idx);
       out.set(frameData, HEADER_SIZE + idx * paddedFrame);
-      // padding is already zeroed (Uint8Array default)
     }
 
     return out;
@@ -258,42 +290,69 @@ export class DATFile {
     }
   }
 
-  /** @private */
+  /**
+   * Build the 512-byte header.
+   * Byte 16-17 = controller/slave count (uint16 LE).
+   * @private
+   */
   _buildHeader() {
     const hdr = new Uint8Array(HEADER_SIZE);
+    const ctrlCount = this.controllerCount;
 
     if (this._templateHeader) {
       hdr.set(this._templateHeader.subarray(0, HEADER_SIZE));
-      hdr[16] = this.numUniverses & 0xff;
-      hdr[17] = (this.numUniverses >> 8) & 0xff;
+      hdr[16] = ctrlCount & 0xff;
+      hdr[17] = (ctrlCount >> 8) & 0xff;
       return hdr;
     }
 
     hdr.set(MAGIC, 0);
     hdr.set(CONFIG_BYTES, 4);
-    hdr[16] = this.numUniverses & 0xff;
-    hdr[17] = (this.numUniverses >> 8) & 0xff;
+    hdr[16] = ctrlCount & 0xff;
+    hdr[17] = (ctrlCount >> 8) & 0xff;
     hdr.set(EXTENDED_CONFIG, 18);
 
     return hdr;
   }
 
-  /** @private */
+  /**
+   * Build one frame with interleaved groups and BGR channel order.
+   *
+   * Group size = 8 × controllerCount. Each LED uses 3 consecutive groups
+   * (B, G, R). Within each controller's 8-byte block, port N (1-based
+   * within that controller) maps to byte position (8 - N).
+   *
+   * Universe uid maps to: controller = floor(uid / 8), local port = (uid % 8) + 1,
+   * byte offset within group = controller * 8 + (7 - uid % 8).
+   *
+   * Values are gamma-corrected (gamma 2.2) before writing.
+   * @private
+   */
   _buildFrame(frameIdx) {
-    const buf = new Uint8Array(this.totalPixels * 3);
-    let offset = 0;
+    const maxLeds = this.maxLedsPerPort;
+    const grpSize = this.groupSize;
+    const frameBytes = maxLeds * 3 * grpSize;
+    const buf = new Uint8Array(frameBytes);
 
     for (let uid = 0; uid < this.numUniverses; uid++) {
       const numLeds = this._universes[uid];
       const srcBase = frameIdx * numLeds * 3;
+      // controller index × 8 + (7 - local port index)
+      const ctrlIdx = (uid / PORTS_PER_CONTROLLER) | 0;
+      const localPort = uid % PORTS_PER_CONTROLLER;
+      const bytePos = ctrlIdx * PORTS_PER_CONTROLLER + (7 - localPort);
 
-      for (let p = 0; p < numLeds; p++) {
-        const src = srcBase + p * 3;
-        // RGB -> BGR
-        buf[offset] = this._pixelData[uid][src + 2];     // B
-        buf[offset + 1] = this._pixelData[uid][src + 1];  // G
-        buf[offset + 2] = this._pixelData[uid][src];       // R
-        offset += 3;
+      for (let led = 0; led < numLeds; led++) {
+        const src = srcBase + led * 3;
+        const r = this._pixelData[uid][src];
+        const g = this._pixelData[uid][src + 1];
+        const b = this._pixelData[uid][src + 2];
+
+        // 3 groups per LED: B, G, R (each group is grpSize bytes)
+        const groupBase = led * 3 * grpSize;
+        buf[groupBase + bytePos] = GAMMA_LUT[b];                    // B group
+        buf[groupBase + grpSize + bytePos] = GAMMA_LUT[g];          // G group
+        buf[groupBase + 2 * grpSize + bytePos] = GAMMA_LUT[r];      // R group
       }
     }
 
