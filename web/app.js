@@ -155,7 +155,11 @@ let isPlaying = false;
 
 /** @type {Blob[]} All video frames stored as JPEG blobs */
 let frames = [];
+/** @type {Blob[]} Raw extracted frames before blend (kept for re-blending) */
+let rawFrames = [];
 let currentFrameIdx = 0;
+/** Number of frames to crossfade for seamless looping (0 = disabled) */
+let blendFrameCount = 0;
 
 // Frame decode cache delegated to player module
 const ensureFrameDecoded = player.ensureFrameDecoded;
@@ -423,6 +427,7 @@ async function extractFrames() {
   // Free old frames
   clearDecodedFrame();
   frames = [];
+  rawFrames = [];
   currentFrameIdx = 0;
 
   const fps = detectedFPS || 30;
@@ -501,6 +506,13 @@ async function extractFrames() {
   video.style.display = "none";
   overlay.classList.add("static");
 
+  // Keep raw frames for re-blending when blend count changes
+  rawFrames = frames.slice();
+
+  if (blendFrameCount > 0) {
+    await applyBlend();
+  }
+
   inPoint = 0;
   outPoint = frames.length - 1;
 
@@ -508,6 +520,62 @@ async function extractFrames() {
   updateLinePreviews();
   renderOutputSection();
   setStatus(`Extracted ${frames.length} frames (${video.duration.toFixed(1)}s, ~${detectedFPS}fps)`);
+}
+
+/**
+ * Apply crossfade blend for seamless looping.
+ * Blends the last N frames with the first N frames, then trims the first N.
+ * Operates on rawFrames → frames.
+ */
+async function applyBlend() {
+  const N = blendFrameCount;
+  const total = rawFrames.length;
+  if (N <= 0 || N >= total) {
+    frames = rawFrames.slice();
+    return;
+  }
+
+  setStatus(`Blending ${N} frames for loop...`);
+  await new Promise((r) => setTimeout(r, 0));
+
+  const blendCanvas = document.createElement("canvas");
+  blendCanvas.width = mediaW;
+  blendCanvas.height = mediaH;
+  const blendCtx = blendCanvas.getContext("2d");
+
+  // Start with a copy of raw frames
+  const result = rawFrames.slice();
+
+  // Blend last N frames with first N frames
+  for (let i = 0; i < N; i++) {
+    const tailIdx = total - N + i;   // frame near the end
+    const headIdx = i;                // corresponding frame from the start
+    // t goes from ~0 (mostly tail) to ~1 (mostly head) for seamless loop
+    const t = (i + 1) / (N + 1);
+
+    const [tailBmp, headBmp] = await Promise.all([
+      createImageBitmap(rawFrames[tailIdx]),
+      createImageBitmap(rawFrames[headIdx]),
+    ]);
+
+    // Draw tail frame, then overlay head frame with opacity t
+    blendCtx.globalAlpha = 1;
+    blendCtx.drawImage(tailBmp, 0, 0);
+    blendCtx.globalAlpha = t;
+    blendCtx.drawImage(headBmp, 0, 0);
+
+    tailBmp.close();
+    headBmp.close();
+
+    // Encode blended frame back to JPEG blob
+    const blob = await new Promise((resolve) =>
+      blendCanvas.toBlob(resolve, "image/jpeg", 0.90)
+    );
+    result[tailIdx] = blob;
+  }
+
+  // Trim the first N frames (they've been blended into the tail)
+  frames = result.slice(N);
 }
 
 // ------------------------------------------------------------------ //
@@ -880,6 +948,45 @@ function renderOutputSection() {
 
       ioRow.append(inLabel, inInput, inSetBtn, outLabel, outInput, outSetBtn, rangeLabel);
       body.appendChild(ioRow);
+
+      // Blend frames row (crossfade for seamless looping)
+      const blendRow = document.createElement("div");
+      blendRow.className = "point-row io-row";
+      blendRow.style.cursor = "default";
+
+      const blendLabel = document.createElement("label");
+      blendLabel.style.cssText = "font-size:0.75rem;color:#aaa";
+      blendLabel.textContent = "Loop blend";
+
+      const blendInput = document.createElement("input");
+      blendInput.type = "number";
+      blendInput.min = "0";
+      blendInput.max = String(Math.floor(rawFrames.length / 2));
+      blendInput.value = String(blendFrameCount);
+      blendInput.style.width = "56px";
+      blendInput.title = "Crossfade N frames at loop point for seamless looping";
+      blendInput.addEventListener("change", async () => {
+        const maxBlend = Math.floor(rawFrames.length / 2);
+        blendFrameCount = Math.max(0, Math.min(maxBlend, parseInt(blendInput.value) || 0));
+        blendInput.value = blendFrameCount;
+        clearDecodedFrame();
+        await applyBlend();
+        inPoint = 0;
+        outPoint = frames.length - 1;
+        currentFrameIdx = Math.min(currentFrameIdx, frames.length - 1);
+        drawOverlay();
+        renderOutputSection();
+        markAllPortsDirty();
+      });
+
+      const blendHint = document.createElement("span");
+      blendHint.style.cssText = "font-size:0.7rem;color:#666";
+      blendHint.textContent = blendFrameCount > 0
+        ? `${rawFrames.length} raw \u2192 ${frames.length} blended`
+        : "0 = off";
+
+      blendRow.append(blendLabel, blendInput, blendHint);
+      body.appendChild(blendRow);
 
       // In/out frame thumbnails
       const thumbRow = document.createElement("div");
@@ -1794,6 +1901,8 @@ function loadScene() {
     if (result.detectedFPS != null) detectedFPS = result.detectedFPS;
 
     frames = result.frames;
+    rawFrames = result.frames.slice();
+    blendFrameCount = 0;
     loadedImage = result.loadedImage;
     controllers = result.controllers;
     activeSelection = null;
