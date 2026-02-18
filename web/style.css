@@ -614,3 +614,30 @@ button:disabled {
   margin: 4px 0 0 0;
   font-style: italic;
 }
+
+/* -- viewer fullscreen mode -- */
+
+body.viewer-fullscreen {
+  overflow: hidden;
+}
+
+body.viewer-fullscreen .video-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  border-radius: 0;
+  background: #000;
+  /* grid stacks video + canvas in same cell, centered */
+  display: grid;
+  place-items: center;
+}
+
+body.viewer-fullscreen .video-wrap video,
+body.viewer-fullscreen .video-wrap canvas {
+  grid-area: 1 / 1;
+  position: relative;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}

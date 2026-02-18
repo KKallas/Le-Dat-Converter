@@ -1514,6 +1514,9 @@ async function drawOverlay() {
 
 /** Draw port polylines and control points on the overlay (no background clear/draw) */
 function drawOverlayPorts() {
+  // Inverse zoom so UI elements (lines, points, text) stay constant screen size
+  const inv = 1 / viewport.getZoom();
+
   const transformActive = toolbar.isToolActive();
   const savedPositions = transformActive ? toolbar.getSavedPositions() : null;
 
@@ -1540,8 +1543,8 @@ function drawOverlayPorts() {
 
       overlayCtx.globalAlpha = 0.25;
       overlayCtx.strokeStyle = color;
-      overlayCtx.lineWidth = 2;
-      overlayCtx.setLineDash([6, 4]);
+      overlayCtx.lineWidth = 2 * inv;
+      overlayCtx.setLineDash([6 * inv, 4 * inv]);
       overlayCtx.beginPath();
       overlayCtx.moveTo(origPts[0].x, origPts[0].y);
       for (let i = 1; i < origPts.length; i++) {
@@ -1559,7 +1562,7 @@ function drawOverlayPorts() {
     const pts = port.points;
 
     overlayCtx.strokeStyle = color;
-    overlayCtx.lineWidth = 2;
+    overlayCtx.lineWidth = 2 * inv;
     overlayCtx.beginPath();
     overlayCtx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) {
@@ -1577,31 +1580,31 @@ function drawOverlayPorts() {
       // Selected points get a cyan highlight ring
       if (isSelected) {
         overlayCtx.strokeStyle = "#00aaff";
-        overlayCtx.lineWidth = 2;
+        overlayCtx.lineWidth = 2 * inv;
         overlayCtx.beginPath();
-        overlayCtx.arc(pt.x, pt.y, 9, 0, Math.PI * 2);
+        overlayCtx.arc(pt.x, pt.y, 9 * inv, 0, Math.PI * 2);
         overlayCtx.stroke();
       }
 
       overlayCtx.fillStyle = isActive ? "#fff" : isSelected ? "#00aaff" : color;
       overlayCtx.beginPath();
-      overlayCtx.arc(pt.x, pt.y, isActive ? 7 : 5, 0, Math.PI * 2);
+      overlayCtx.arc(pt.x, pt.y, (isActive ? 7 : 5) * inv, 0, Math.PI * 2);
       overlayCtx.fill();
 
       if (isActive) {
         overlayCtx.strokeStyle = "#fff";
-        overlayCtx.lineWidth = 2;
+        overlayCtx.lineWidth = 2 * inv;
         overlayCtx.beginPath();
-        overlayCtx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
+        overlayCtx.arc(pt.x, pt.y, 10 * inv, 0, Math.PI * 2);
         overlayCtx.stroke();
       }
 
       overlayCtx.fillStyle = "#fff";
-      overlayCtx.font = "12px sans-serif";
+      overlayCtx.font = `${12 * inv}px sans-serif`;
       overlayCtx.fillText(
         String.fromCharCode(65 + pti),
-        pt.x + 10,
-        pt.y - 10
+        pt.x + 10 * inv,
+        pt.y - 10 * inv
       );
     });
   });
@@ -1616,21 +1619,22 @@ function drawOverlayPorts() {
       const isActive = activeCtrl === cp.key;
 
       if (cp.key === "offset") {
-        const sz = isActive ? 8 : 6;
+        const sz = (isActive ? 8 : 6) * inv;
         overlayCtx.fillStyle = isActive ? "#fff" : "#00ff88";
         overlayCtx.fillRect(cp.x - sz, cp.y - sz, sz * 2, sz * 2);
         if (isActive) {
           overlayCtx.strokeStyle = "#fff";
-          overlayCtx.lineWidth = 2;
-          overlayCtx.strokeRect(cp.x - sz - 3, cp.y - sz - 3, (sz + 3) * 2, (sz + 3) * 2);
+          overlayCtx.lineWidth = 2 * inv;
+          const outer = sz + 3 * inv;
+          overlayCtx.strokeRect(cp.x - outer, cp.y - outer, outer * 2, outer * 2);
         }
         overlayCtx.fillStyle = "#fff";
-        overlayCtx.font = "11px sans-serif";
-        overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
+        overlayCtx.font = `${11 * inv}px sans-serif`;
+        overlayCtx.fillText(cp.key, cp.x + 10 * inv, cp.y - 8 * inv);
       } else if (cp.key === "pivot") {
-        const sz = 8;
+        const sz = 8 * inv;
         overlayCtx.strokeStyle = isActive ? "#fff" : "#ffaa00";
-        overlayCtx.lineWidth = 2;
+        overlayCtx.lineWidth = 2 * inv;
         overlayCtx.beginPath();
         overlayCtx.moveTo(cp.x - sz, cp.y); overlayCtx.lineTo(cp.x + sz, cp.y);
         overlayCtx.moveTo(cp.x, cp.y - sz); overlayCtx.lineTo(cp.x, cp.y + sz);
@@ -1645,18 +1649,18 @@ function drawOverlayPorts() {
       } else {
         overlayCtx.fillStyle = isActive ? "#fff" : "#00aaff";
         overlayCtx.beginPath();
-        overlayCtx.arc(cp.x, cp.y, isActive ? 8 : 6, 0, Math.PI * 2);
+        overlayCtx.arc(cp.x, cp.y, (isActive ? 8 : 6) * inv, 0, Math.PI * 2);
         overlayCtx.fill();
         if (isActive) {
           overlayCtx.strokeStyle = "#fff";
-          overlayCtx.lineWidth = 2;
+          overlayCtx.lineWidth = 2 * inv;
           overlayCtx.beginPath();
-          overlayCtx.arc(cp.x, cp.y, 11, 0, Math.PI * 2);
+          overlayCtx.arc(cp.x, cp.y, 11 * inv, 0, Math.PI * 2);
           overlayCtx.stroke();
         }
         overlayCtx.fillStyle = "#fff";
-        overlayCtx.font = "11px sans-serif";
-        overlayCtx.fillText(cp.key, cp.x + 10, cp.y - 8);
+        overlayCtx.font = `${11 * inv}px sans-serif`;
+        overlayCtx.fillText(cp.key, cp.x + 10 * inv, cp.y - 8 * inv);
       }
 
       // Draw dashed lines: offset→pivot, pivot→rotate/scale handles
@@ -1664,8 +1668,8 @@ function drawOverlayPorts() {
         const off = controls.find((c) => c.key === "offset");
         if (off) {
           overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
-          overlayCtx.lineWidth = 1;
-          overlayCtx.setLineDash([4, 4]);
+          overlayCtx.lineWidth = 1 * inv;
+          overlayCtx.setLineDash([4 * inv, 4 * inv]);
           overlayCtx.beginPath();
           overlayCtx.moveTo(off.x, off.y);
           overlayCtx.lineTo(cp.x, cp.y);
@@ -1676,8 +1680,8 @@ function drawOverlayPorts() {
         const pivot = controls.find((c) => c.key === "pivot");
         if (pivot) {
           overlayCtx.strokeStyle = "rgba(255,255,255,0.3)";
-          overlayCtx.lineWidth = 1;
-          overlayCtx.setLineDash([4, 4]);
+          overlayCtx.lineWidth = 1 * inv;
+          overlayCtx.setLineDash([4 * inv, 4 * inv]);
           overlayCtx.beginPath();
           overlayCtx.moveTo(pivot.x, pivot.y);
           overlayCtx.lineTo(cp.x, cp.y);

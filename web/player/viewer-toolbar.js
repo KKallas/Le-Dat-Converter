@@ -10,6 +10,8 @@ let _wrap = null;
 let _el = null;
 let _mode = "points";
 let _visible = false;
+let _fullscreen = false;
+let _fsBtn = null;
 
 /** @type {{ onHome: Function, onSelected: Function } | null} */
 let _actions = null;
@@ -22,6 +24,7 @@ export function init(videoWrap, actions) {
 
 export function getMode() { return _mode; }
 export function isVisible() { return _visible; }
+export function isFullscreen() { return _fullscreen; }
 
 export function toggle() {
   _visible = !_visible;
@@ -33,6 +36,19 @@ export function toggle() {
     if (sel) sel.value = "points";
   }
   if (_el) _el.classList.toggle("hidden", !_visible);
+}
+
+export function toggleFullscreen() {
+  _fullscreen = !_fullscreen;
+  document.body.classList.toggle("viewer-fullscreen", _fullscreen);
+  if (_fsBtn) _fsBtn.textContent = _fullscreen ? "Exit" : "Full";
+}
+
+function _onKeyDown(e) {
+  if (e.key === "Escape" && _fullscreen) {
+    e.preventDefault();
+    toggleFullscreen();
+  }
 }
 
 function _build() {
@@ -69,14 +85,24 @@ function _build() {
     if (_actions?.onSelected) _actions.onSelected();
   });
 
+  _fsBtn = document.createElement("button");
+  _fsBtn.className = "btn-small";
+  _fsBtn.textContent = "Full";
+  _fsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFullscreen();
+  });
+
   // Prevent toolbar clicks from bubbling to videoWrap (would trigger
   // triple-click detection and pointer handlers in app.js)
   _el.addEventListener("mousedown", (e) => e.stopPropagation());
   _el.addEventListener("touchstart", (e) => e.stopPropagation());
   _el.addEventListener("dblclick", (e) => e.stopPropagation());
 
-  _el.append(select, homeBtn, selBtn);
+  _el.append(select, homeBtn, selBtn, _fsBtn);
   _wrap.appendChild(_el);
+
+  document.addEventListener("keydown", _onKeyDown);
 }
 
 function _updateCursor() {
