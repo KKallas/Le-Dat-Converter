@@ -664,7 +664,7 @@ RP2040 PIO pin → 6N137 optocoupler → MAX3485 RS-485 driver → SMBJ6.0A TVS 
 
 ## Budget — 50 Test Units (DMX Node)
 
-Proposed budget for building the first 50 8-port DMX nodes for field testing.
+Proposed budget for building the first 50 8-port DMX nodes for field testing. Electronics design (schematic, PCB layout) and mechanical design (enclosure CAD, 3D printing) are covered under project salary. This budget covers materials, fabrication, and external consulting only.
 
 ### 1. Components & PCB Fabrication
 
@@ -673,48 +673,82 @@ Proposed budget for building the first 50 8-port DMX nodes for field testing.
 | Electronic components (BOM × 50) | $1,100 |
 | PCB fabrication + SMT assembly (JLCPCB) | $225 |
 | Connectors (RJ45, terminals, headers) | $185 |
+| Prototype run (5 boards before batch) | $200 |
 | Spare parts buffer (10%) | $150 |
 | Shipping (LCSC/JLCPCB) | $80 |
-| **Subtotal** | **$1,740** |
+| **Subtotal** | **$1,940** |
 
-### 2. Electronics Design (outsource)
-
-| Item | Hours | Rate | Cost |
-|------|-------|------|------|
-| Schematic (ESP32 + RP2040 + 8ch opto/485) | 30 | $75/hr | $2,250 |
-| PCB layout (2-layer, production ready) | 25 | $75/hr | $1,875 |
-| Design review + revisions | 10 | $75/hr | $750 |
-| Prototype run (5 boards before batch) | — | — | $200 |
-| **Subtotal** | **65 hrs** | | **$5,075** |
-
-### 3. 3D Printing (enclosures)
+### 2. Enclosure Materials
 
 | Item | Cost |
 |------|------|
 | Filament/material (PETG or ASA for outdoor use) | $300 |
-| Print time electricity (~3–4 hrs/unit × 50) | $50 |
 | Gaskets/seals for IP65 rating | $150 |
 | Hardware (screws, standoffs, cable glands) | $200 |
-| **Subtotal** | **$700** |
+| **Subtotal** | **$650** |
 
-### 4. External Consulting (contingency)
+### 3. External Consulting — Electrical
 
 | Item | Cost |
 |------|------|
-| EE review (schematic + PCB sign-off) | $1,000 |
-| EMC pre-compliance check | $1,000 |
+| EE review (schematic + PCB sign-off) | $1,500 |
+| EMC pre-compliance check | $1,500 |
 | 230V safety review (if adding mains power) | $1,000 |
 | General troubleshooting buffer | $1,000 |
-| **Subtotal** | **$4,000** |
+| **Subtotal** | **$5,000** |
 
-### Budget Summary
+### 4. External Consulting — Mechanical Design & Packaging
+
+| Item | Cost |
+|------|------|
+| Enclosure design review (IP65, thermal, structural) | $1,000 |
+| Packaging design (labeling, print templates, boxing) | $1,000 |
+| Material/process consultation (outdoor durability) | $1,000 |
+| **Subtotal** | **$3,000** |
+
+### Budget Summary (50 test units)
 
 | Category | Cost |
 |----------|------|
-| Components & PCB | $1,740 |
-| Electronics design (outsource) | $5,075 |
-| 3D printing (enclosures) | $700 |
-| External consulting | $4,000 |
-| **Total** | **$11,515** |
+| Components & PCB fabrication | €1,800 |
+| Enclosure materials | €600 |
+| Consulting — electrical | €4,650 |
+| Consulting — mechanical & packaging | €2,790 |
+| **Total materials + consulting** | **€9,840** |
 
-Per-unit cost: **~$230** (including one-time design and consulting amortized across 50 units). At scale (500+ units), per-unit drops to ~$50 as one-time costs amortize.
+### Development Investment
+
+The full development (firmware, media server, front-end, admin panel, hardware design) is required to make the DMX node a functional product. All phases are amortized into the unit cost.
+
+| Item | Cost |
+|------|------|
+| Salary (employer cost: €4,800/month × 12 months × 60%) | €34,560 |
+| Materials + consulting (50 test units) | €9,840 |
+| **Total development investment** | **€44,400** |
+
+### Production Unit Cost (200 pc/batch)
+
+At 200-unit batch volumes, component and fabrication costs drop with volume pricing.
+
+| Item | Per unit |
+|------|----------|
+| Electronic components (volume pricing) | €13 |
+| PCB fabrication + SMT assembly | €3 |
+| Connectors (RJ45, terminals, headers) | €3 |
+| Enclosure (3D printed PETG/ASA) | €4 |
+| Gaskets, seals, cable glands | €2 |
+| Hardware (screws, standoffs) | €2 |
+| Shipping + overhead | €1 |
+| **Production cost per unit** | **€28** |
+
+Cost per 200-unit batch: **€5,600**
+
+### Unit Cost with Development Amortized (10,000 units)
+
+| | Per unit | Notes |
+|--|----------|-------|
+| Production cost | €28 | 200 pc/batch |
+| Development amortized | €4.44 | €44,400 ÷ 10,000 |
+| **Total cost per unit** | **€32.44** | |
+
+At 10K units with injection-molded enclosures (~€4,000 tooling), production cost drops to ~€22/unit → **€26.44/unit** fully loaded.
