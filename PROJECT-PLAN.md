@@ -205,21 +205,291 @@ Central server that stores animations, manages nodes, and serves the front-end a
 
 Working at **60% capacity** (~3 days/week). Calendar weeks include the 60% factor. The mapping tool (Phase 0) was completed in 1 week at full speed as a reference.
 
-| Phase | Component | Scope | Calendar Weeks |
-|-------|-----------|-------|----------------|
-| **Phase 0** | Mapping Tool | Le-Dat-Converter — done | done |
-| **Phase 1** | ESP32 AP Firmware | WiFi SoftAP + DNS captive portal (~50 lines) | Wk 1 |
-| **Phase 2** | ESP32 DMX Node | WiFi client, frame buffer, DMX output, addressing, OTA | Wk 1–8 |
-| **Phase 3** | Media Server Core | FastAPI, animation storage, node management, discovery, WebSocket | Wk 4–14 |
-| **Phase 4** | QR + Connectivity | QR generation, captive portal flow, Cloudflare Tunnel setup | Wk 12–15 |
-| **Phase 5** | Controller Config UI | Node list, address assignment, add/remove/replace, health | Wk 15–19 |
-| **Phase 6** | Grid View | Animation grid, hover preview, tap-to-activate, fullscreen | Wk 18–24 |
-| **Phase 7** | Mapping Live Preview | Stream mapping to real hardware in real-time | Wk 22–25 |
-| **Phase 8** | Trigger / Calendar | LLM text parsing, calendar UI, scheduler backend | Wk 25–32 |
-| **Phase 9** | Editor | FX library, sequence builder, preview | Wk 30–35 |
-| **Phase 10** | Finger Paint | Canvas editor, stencils, live streaming to nodes | Wk 33–38 |
-| **Phase 11** | Hardware | PCB, enclosure (IP65), 230V, RS-485 (runs in parallel) | Wk 5–20 |
-| **Phase 12** | Integration & Field Test | End-to-end with real decorations, bug fixes, polish | Wk 39–48 |
+**Strategy:** Front-end mockup first for stakeholder approval, then hardware + firmware in parallel to get physical output as early as possible. Each phase has defined deliverables and requires sign-off before the next dependent phase begins.
+
+| Phase | Component | Deadline | Depends on |
+|-------|-----------|----------|------------|
+| **P0** | Mapping Tool | done | — |
+| **P1** | Front-End Mockup | Wk 3 | P0 |
+| **P2** | Hardware Design | Wk 7 | P0 |
+| **P3** | ESP32 AP Firmware | Wk 4 | P0 |
+| **P4** | ESP32 + RP2040 Node Firmware | Wk 12 | P0, P2 |
+| **P5** | Media Server Core | Wk 18 | P4 |
+| **P6** | Hardware Build (50 units) | Wk 16 | P2, P4 |
+| **P7** | QR + Connectivity | Wk 19 | P3, P5 |
+| **P8** | Grid View | Wk 24 | P1, P5 |
+| **P9** | Controller Config UI | Wk 24 | P5 |
+| **P10** | Mapping Live Preview | Wk 27 | P5, P6 |
+| **P11** | Trigger / Calendar | Wk 34 | P5, P8 |
+| **P12** | Editor (Sequence Builder) | Wk 37 | P5, P8 |
+| **P13** | Finger Paint | Wk 40 | P5, P10 |
+| **P14** | Integration & Field Test | Wk 48 | All |
+
+---
+
+### Phase 0 — Mapping Tool ✅
+
+**Status:** Done | **Deadline:** —
+
+| Deliverable | Status |
+|-------------|--------|
+| Video/image import with frame extraction | ✅ |
+| Controller/port hierarchy (multi-controller) | ✅ |
+| Polyline point editing with multi-select | ✅ |
+| Transform tools (offset, rotate, scale) | ✅ |
+| Pan/zoom viewport with fullscreen viewer | ✅ |
+| Per-port LED strip preview rendering | ✅ |
+| In/out point trimming + loop blend | ✅ |
+| Playback with loop | ✅ |
+| .dat export (multi-controller, gamma 2.2, BGR) | ✅ |
+| Scene save/load (.zip) | ✅ |
+| Template header support | ✅ |
+
+---
+
+### Phase 1 — Front-End Mockup
+
+**Deadline:** Wk 3 | **Depends on:** P0 | **Sign-off required before:** P3, P4, P8
+
+Static clickable prototype of all customer-facing screens. No backend, no live data — HTML/CSS/JS screens with placeholder content for stakeholder review and approval.
+
+| Deliverable |
+|-------------|
+| Grid view mockup: animation thumbnails, hover preview, tap-to-activate flow |
+| Fullscreen playback mockup with trigger list overlay |
+| Editor mockup: FX library, timeline/playlist drag-and-drop, preview area |
+| Trigger/calendar mockup: natural language input, calendar view, event list |
+| Finger paint mockup: canvas editor, brush tools, stencil panel |
+| QR scan landing flow: WiFi connect → captive portal → grid view |
+| Clickable navigation between all screens |
+| Stakeholder approval document (sign-off on scope of each screen) |
+
+---
+
+### Phase 2 — Hardware Design
+
+**Deadline:** Wk 7 | **Depends on:** P0 | **Sign-off required before:** P6
+
+PCB design (outsourced), 3D enclosure design, prototype ordering.
+
+| Deliverable |
+|-------------|
+| Schematic: ESP32 + RP2040 + 8× optoisolated RS-485 (reviewed by EE consultant) |
+| PCB layout: 2-layer, production-ready Gerbers |
+| 3D enclosure: Fusion 360 model, IP65-rated, 8× RJ45 + power + cable glands |
+| BOM finalized and sourced on LCSC |
+| Prototype order placed: 5 PCBs + components for validation |
+| Prototype boards assembled and basic power-on test passed |
+
+---
+
+### Phase 3 — ESP32 AP Firmware
+
+**Deadline:** Wk 4 | **Depends on:** P0
+
+WiFi SoftAP + DNS captive portal on ESP32 Atom. ~50 lines of firmware.
+
+| Deliverable |
+|-------------|
+| ESP32 Atom creates WiFi AP with configurable SSID/password |
+| DNS server redirects all queries to configurable phone IP |
+| Captive portal triggers auto-open on iOS and Android |
+| SSID, password, phone IP stored in flash (persist across reboot) |
+| Flashed and tested on physical ESP32 Atom S3 |
+
+---
+
+### Phase 4 — ESP32 + RP2040 Node Firmware
+
+**Deadline:** Wk 12 | **Depends on:** P0, P2 (prototype boards)
+
+Full DMX node firmware: ESP32 (WiFi + control) + RP2040 (8-port DMX output via PIO).
+
+| Deliverable |
+|-------------|
+| ESP32: WiFi client, auto-reconnect, AP fallback for initial config |
+| ESP32 ↔ RP2040: SPI bus communication, frame data transfer |
+| RP2040: 8× PIO state machines outputting DMX512 at 250kbaud in parallel |
+| Frame buffer: receive frames over WiFi, buffer, output at configured FPS |
+| Controller:port addressing stored in flash |
+| OTA firmware update for both ESP32 and RP2040 |
+| Status LED heartbeat |
+| Verified: 8 DMX outputs measured correct on oscilloscope |
+| Verified: receives test pattern over WiFi and outputs to all 8 ports |
+
+---
+
+### Phase 5 — Media Server Core
+
+**Deadline:** Wk 18 | **Depends on:** P4
+
+Central server: animation storage, node management, API, WebSocket.
+
+| Deliverable |
+|-------------|
+| FastAPI server running on Raspberry Pi or Android (Termux) |
+| Animation storage: upload/list/delete .dat files with metadata (name, thumbnail, tags) |
+| Node registry: register/deregister nodes, store controller:port addresses |
+| Node discovery: mDNS or UDP broadcast to find nodes on network |
+| Frame streaming: push .dat frame data to nodes over WebSocket at target FPS |
+| REST API: endpoints for all operations (documented with OpenAPI/Swagger) |
+| WebSocket API: real-time frame push, node status updates |
+| Persistence: SQLite database for config, node registry, animation metadata |
+| Verified: upload a .dat file via API, stream to a physical node, LEDs light up |
+
+---
+
+### Phase 6 — Hardware Build (50 units)
+
+**Deadline:** Wk 16 | **Depends on:** P2 (final PCBs), P4 (firmware)
+
+Assemble, flash, and test 50 production nodes.
+
+| Deliverable |
+|-------------|
+| 50 PCBs fabricated and SMT assembled (JLCPCB) |
+| 50 enclosures 3D printed with gaskets and cable glands |
+| Final assembly: connectors, wiring, enclosure mounting |
+| Each node flashed with firmware (ESP32 + RP2040) |
+| Each node passes test procedure: all 8 DMX outputs verified |
+| 50 nodes boxed and labeled with controller:port addresses |
+
+---
+
+### Phase 7 — QR + Connectivity
+
+**Deadline:** Wk 19 | **Depends on:** P3, P5
+
+QR code generation and both access paths (local WiFi + remote tunnel).
+
+| Deliverable |
+|-------------|
+| WiFi QR generation: `WIFI:T:WPA;S:{ssid};P:{password};;` per decoration |
+| URL QR generation: `https://{deco-id}.example.com` per decoration |
+| Captive portal flow tested: scan WiFi QR → auto-connect → browser opens grid view |
+| Cloudflare Tunnel setup: phone runs `cloudflared`, public URL works |
+| Remote flow tested: scan URL QR → browser loads grid view via tunnel |
+| QR code printable output (PDF label per decoration) |
+
+---
+
+### Phase 8 — Grid View
+
+**Deadline:** Wk 24 | **Depends on:** P1 (approved mockup), P5
+
+Customer-facing animation selection screen.
+
+| Deliverable |
+|-------------|
+| Animation grid: thumbnails loaded from media server API |
+| Hover/long-press preview: colorized animated thumbnail |
+| Tap to activate: sends selection to media server → pushes to target node |
+| Fullscreen playback view after selection |
+| QR routing: page reads deco ID from URL, targets correct node |
+| Works on mobile (iOS Safari, Android Chrome) and desktop |
+| Verified end-to-end: customer scans QR → selects animation → LEDs change |
+
+---
+
+### Phase 9 — Controller Config UI
+
+**Deadline:** Wk 24 | **Depends on:** P5
+
+Admin panel for managing the ESP32 node network.
+
+| Deliverable |
+|-------------|
+| Node list view: all registered nodes with online/offline status |
+| Address assignment UI: assign/reassign controller:port to physical nodes |
+| Add/remove nodes: register new, decommission old |
+| Replace node: swap a failed node, new node inherits old address |
+| Firmware update: trigger OTA push to selected nodes |
+| Health dashboard: connection status, uptime, error count |
+
+---
+
+### Phase 10 — Mapping Live Preview
+
+**Deadline:** Wk 27 | **Depends on:** P5, P6 (working hardware)
+
+Stream mapping tool output to real hardware in real-time.
+
+| Deliverable |
+|-------------|
+| Le-Dat-Converter connects to media server API |
+| Live preview mode: sampled pixel data streams to nodes as you edit |
+| Frame rate target: ≥15 FPS live preview |
+| Works with pan/zoom, point editing — updates in real-time |
+| Verified on physical installation with ≥2 nodes |
+
+---
+
+### Phase 11 — Trigger / Calendar
+
+**Deadline:** Wk 34 | **Depends on:** P5, P8
+
+Schedule when animations play. LLM-powered natural language to calendar events.
+
+| Deliverable |
+|-------------|
+| Natural language input: text box for schedule description |
+| LLM parsing: text → iCal-style recurrence rules (via Claude API) |
+| Calendar view: visual month/week view showing scheduled events |
+| Manual editing: add, remove, modify individual events |
+| Per-deco assignment: each trigger maps to a decoration + animation |
+| Scheduler backend: media server executes events at scheduled times |
+| Verified: create schedule via NL → events appear on calendar → animations play on time |
+
+---
+
+### Phase 12 — Editor (Sequence Builder)
+
+**Deadline:** Wk 37 | **Depends on:** P5, P8
+
+Build animation sequences from predefined FX.
+
+| Deliverable |
+|-------------|
+| FX library: list of available effects per LED type (chase, fade, rainbow, etc.) |
+| Timeline/playlist: drag-and-drop ordering with duration per step |
+| Simulated preview: canvas preview of the sequence |
+| Export: save as playable sequence on media server |
+| Verified: build a sequence → preview → play on real hardware |
+
+---
+
+### Phase 13 — Finger Paint
+
+**Deadline:** Wk 40 | **Depends on:** P5, P10
+
+Live painting tool — draw on the decoration in real-time.
+
+| Deliverable |
+|-------------|
+| Canvas editor: touch/mouse drawing on LED layout representation |
+| Brush tools: color picker, brush size, eraser |
+| Stencils: predefined shapes (flags, patterns, symbols) snapping to LED grid |
+| Live output: painted pixels stream to nodes in real-time (≥15 FPS) |
+| Save: save painted frame as a static animation on media server |
+| Verified: paint on phone screen → LEDs update live |
+
+---
+
+### Phase 14 — Integration & Field Test
+
+**Deadline:** Wk 48 | **Depends on:** All phases
+
+End-to-end testing with real outdoor installations.
+
+| Deliverable |
+|-------------|
+| Full system deployed on ≥1 real decoration site |
+| All access paths working: local WiFi QR + remote URL QR |
+| 48-hour continuous run test (stability, memory leaks, reconnection) |
+| Weather exposure test (IP65 enclosures, cable glands) |
+| Customer walkthrough: non-technical user completes full flow |
+| Bug fix log: all issues found and resolved |
+| Final documentation: installation guide, troubleshooting guide |
 
 ### Schedule (48 weeks, Gantt-style)
 
@@ -227,36 +497,43 @@ Working at **60% capacity** (~3 days/week). Calendar weeks include the 60% facto
 Week  1         10        20        30        40       48
       |---------|---------|---------|---------|--------|
 P0  ■ done
-P1  ■ AP firmware
-P2  ████████ DMX node firmware
-P3      ███████████ media server
-P4              ████ QR + connectivity
-P5                █████ controller config
-P6                   ███████ grid view
-P7                       ████ live preview
-P8                           ████████ triggers/calendar
-P9                               ██████ editor
-P10                                 ██████ finger paint
-P11   ████████████████ hardware (parallel)
-P12                                        ██████████ integration
+P1  ███ front-end mockup (approval gate)
+P2   ██████ hardware design (outsource PCB)
+P3     ■ AP firmware
+P4     █████████ node firmware (ESP32 + RP2040)
+P5          ███████████ media server
+P6            ███████ hardware build + test (PCBs arrive)
+P7                  ████ QR + connectivity
+P8                   ███████ grid view
+P9                      █████ controller config
+P10                         ████ live preview
+P11                             ████████ triggers/calendar
+P12                                ██████ editor
+P13                                   ██████ finger paint
+P14                                          █████████ integration
 ```
 
 ### Critical path
 
 ```
-P0 (done) → P1 (AP) → P2 (DMX node) ─┐
-                                       ├→ P3 (server) → P4 (QR) → P5 (config)
-                                       │                    │
-                                       │                    └→ P6 (grid) → P7 (live preview)
-                                       │                                        │
-                                       │                    P8 (triggers) ◄─────┘
-                                       │                    P9 (editor) ◄───────┘
-                                       │                    P10 (paint) ◄───────┘
-                                       │                                        │
-P11 (hardware, parallel) ──────────────┘                    P12 (integration) ◄─┘
+P0 (done) → P1 (mockup, approval gate)
+               │
+               ├→ P2 (HW design) → P6 (HW build + test)
+               │                         │
+               ├→ P3 (AP) → P4 (node FW) ┘
+               │                │
+               │                └→ P5 (server) → P7 (QR) → P8 (grid)
+               │                                    │
+               │                       P9 (config) ◄┘
+               │                       P10 (live preview) ◄── P8
+               │                       P11 (triggers) ◄───── P10
+               │                       P12 (editor) ◄─────── P10
+               │                       P13 (paint) ◄──────── P10
+               │                                                │
+               └────────────────────── P14 (integration) ◄─────┘
 ```
 
-**P2 + P3 are the critical path** — everything else depends on working nodes and a server. Hardware (P11) runs in parallel from week 5. The final 10 weeks (39–48) are dedicated to integration testing with real outdoor installations.
+**P1 (mockup) is the first gate** — stakeholder approval before committing to build. Hardware design (P2) starts in parallel during Wk 2 so PCBs arrive by Wk 10. **P4 + P5 are the critical software path** — working nodes and server unlock everything else. First physical DMX output targets **Wk 12** (prototype boards + firmware ready).
 
 ---
 
