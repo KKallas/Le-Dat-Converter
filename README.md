@@ -210,8 +210,6 @@ Le-Dat-Converter/
     style.css               # all styling
     core/
       utils.js              # zip, crc32, download helpers
-      state.js              # (unused) central state store with pub/sub
-      events.js             # (unused) event bus for cross-module communication
     player/
       player.js             # playback: play/pause/stop/seek, frame extraction
       viewport.js           # overlay canvas, pan/zoom, coordinate transforms

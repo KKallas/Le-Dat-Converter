@@ -6,7 +6,7 @@
  * Shared state interface — the host wires getters/setters
  * that map to whatever state management is in use.
  * @type {{ frames: Blob[], currentFrame: number, isPlaying: boolean,
- *          fps: number, inPoint: number, outPoint: number }}
+ *          fps: number, inPoint: number, outPoint: number, looping: boolean }}
  */
 let S = null;
 
@@ -75,9 +75,13 @@ export async function play() {
       lastTime += interval;
       S.currentFrame++;
       if (S.currentFrame > S.outPoint) {
-        S.currentFrame = S.outPoint;
-        pause();
-        return;
+        if (S.looping) {
+          S.currentFrame = S.inPoint;
+        } else {
+          S.currentFrame = S.outPoint;
+          pause();
+          return;
+        }
       }
       decoding = true;
       ensureFrameDecoded(S.currentFrame).then((bmp) => {

@@ -1,4 +1,4 @@
-import { samplePolyline as _samplePolyline, samplePortLine as _samplePortLine } from "./renderer/sampling.js";
+import { samplePortLine as _samplePortLine } from "./renderer/sampling.js";
 import * as player from "./player/player.js";
 import * as viewport from "./player/viewport.js";
 import * as viewerToolbar from "./player/viewer-toolbar.js";
@@ -109,12 +109,6 @@ function selectAllInController(ci) {
   toolbar.onSelectionChanged();
 }
 
-function clearSelection() {
-  selectedPoints.clear();
-  activeSelection = null;
-  toolbar.onSelectionChanged();
-}
-
 /** Get all selected points as objects */
 function getSelectedPointObjects() {
   const result = [];
@@ -152,6 +146,7 @@ let outputCollapsed = false;
 let includeTxt = false;
 let exporting = false;
 let isPlaying = false;
+let looping = false;
 
 /** @type {Blob[]} All video frames stored as JPEG blobs */
 let frames = [];
@@ -217,6 +212,7 @@ const playerState = {
   get fps() { return detectedFPS || 30; },
   get inPoint() { return inPoint; },
   get outPoint() { return outPoint; },
+  get looping() { return looping; },
 };
 
 viewport.init(overlay, videoWrap);
@@ -1062,6 +1058,14 @@ function renderOutputSection() {
     stopBtn.textContent = "\u23f9 Stop";
     stopBtn.addEventListener("click", doStop);
 
+    const loopBtn = document.createElement("button");
+    loopBtn.className = "btn-small";
+    loopBtn.textContent = looping ? "\ud83d\udd01 Loop" : "\u27a1 Once";
+    loopBtn.addEventListener("click", () => {
+      looping = !looping;
+      renderOutputSection();
+    });
+
     const frameLabel = document.createElement("span");
     frameLabel.id = "frame-label";
     frameLabel.className = "frame-label";
@@ -1069,7 +1073,7 @@ function renderOutputSection() {
     const t = currentFrameIdx / fps;
     frameLabel.textContent = `${currentFrameIdx} / ${frames.length}  (${t.toFixed(2)}s)`;
 
-    playRow.append(playBtn, stopBtn, frameLabel);
+    playRow.append(playBtn, stopBtn, loopBtn, frameLabel);
     wrap.appendChild(playRow);
 
     const seekBar = document.createElement("input");

@@ -175,7 +175,7 @@ export function setMediaSize(w, h) {
 }
 
 /** Convert screen (DOM) coordinates to media pixel coordinates, accounting for pan/zoom. */
-export function screenToMedia(clientX, clientY) {
+function screenToMedia(clientX, clientY) {
   const rect = _wrap.getBoundingClientRect();
   // Position within the wrap element
   const sx = clientX - rect.left;
@@ -191,17 +191,8 @@ export function screenToMedia(clientX, clientY) {
   return { x: Math.round(mx), y: Math.round(my) };
 }
 
-/** Convert media pixel coordinates to canvas coordinates (for drawing). */
-export function mediaToCanvas(mx, my) {
-  return {
-    x: mx * zoom + panX,
-    y: my * zoom + panY,
-  };
-}
-
 /**
  * Get media coordinates from a pointer event.
- * Replaces the old getMediaCoords function, adding pan/zoom support.
  */
 export function getMediaCoords(e) {
   const touch = e.touches?.[0] || e.changedTouches?.[0];
