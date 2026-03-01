@@ -30,20 +30,12 @@ export async function deserializeScene(text, fileMap, setStatus) {
     mediaH: scene.mediaH || 0,
     inPoint: scene.inPoint ?? 0,
     outPoint: scene.outPoint ?? 0,
-    templateFileName: scene.templateFileName || "",
-    templateHeaderBuffer: null,
+    selectedFormatName: scene.selectedFormatName || "DM1812",
+    gamma: scene.gamma ?? 2.2,
     loadedImage: null,
     frames: [],
     controllers: [],
   };
-
-  // Restore template header
-  if (scene.templateHeader) {
-    const binary = atob(scene.templateHeader);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    result.templateHeaderBuffer = bytes.buffer;
-  }
 
   // Restore media content from zip
   if (fileMap) {

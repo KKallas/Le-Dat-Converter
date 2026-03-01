@@ -7,6 +7,7 @@ import * as toolbar from "./tools/toolbar.js";
 import { saveScene as _saveScene } from "./scene/save.js";
 import { loadScene as _loadScene } from "./scene/load.js";
 import { doExport as _doExport } from "./output/export.js";
+import { formats, defaultFormat, getFormat } from "../js/formats/registry.js";
 import {
   rebuildPortsList as _rebuildPorts, createController, createPort,
   firstFlatIndex, addPointToPort as _addPoint, removePointFromPort as _removePoint,
@@ -136,10 +137,11 @@ let sampleCtx = null;
 let dragging = false;
 let lastDragUpdate = 0;
 
-// Template header from a LEDBuild .dat file
-/** @type {ArrayBuffer|null} */
-let templateHeaderBuffer = null;
-let templateFileName = "";
+// Controller format
+let selectedFormat = defaultFormat;
+
+// Gamma correction
+let gammaValue = 2.2;
 
 // Output section state
 let outputCollapsed = false;
@@ -186,17 +188,6 @@ mediaInput.addEventListener("change", (e) => {
   }
 });
 
-// Auto-load bundled prototype header
-fetch("prototype.dat")
-  .then((r) => r.ok ? r.arrayBuffer() : null)
-  .then((buf) => {
-    if (buf) {
-      templateHeaderBuffer = buf;
-      templateFileName = "prototype.dat";
-      renderOutputSection();
-    }
-  })
-  .catch(() => {});
 
 // ------------------------------------------------------------------ //
 // Frame-based playback (delegates to player/player.js)
@@ -717,37 +708,54 @@ function renderOutputSection() {
     mediaRow.appendChild(mediaInput);
     body.appendChild(mediaRow);
 
-    // Template file row
-    const tplRow = document.createElement("div");
-    tplRow.className = "point-row";
-    tplRow.style.cursor = "default";
+    // Controller format dropdown row
+    const fmtRow = document.createElement("div");
+    fmtRow.className = "point-row";
+    fmtRow.style.cursor = "default";
 
-    const tplLabel = document.createElement("label");
-    tplLabel.style.cssText = "font-size:0.8rem;color:#aaa;white-space:nowrap";
-    tplLabel.textContent = "Template ";
+    const fmtLabel = document.createElement("label");
+    fmtLabel.style.cssText = "font-size:0.8rem;color:#aaa;white-space:nowrap";
+    fmtLabel.textContent = "Format";
 
-    const tplInput = document.createElement("input");
-    tplInput.type = "file";
-    tplInput.accept = ".dat";
-    tplInput.style.cssText = "font-size:0.75rem;max-width:140px";
-    tplInput.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        templateHeaderBuffer = reader.result;
-        templateFileName = file.name;
-        renderOutputSection();
-      };
-      reader.readAsArrayBuffer(file);
+    const fmtSelect = document.createElement("select");
+    fmtSelect.className = "edit-mode-select";
+    for (const fmt of formats) {
+      const opt = document.createElement("option");
+      opt.value = fmt.name;
+      opt.textContent = fmt.label;
+      if (fmt === selectedFormat) opt.selected = true;
+      fmtSelect.appendChild(opt);
+    }
+    fmtSelect.addEventListener("change", () => {
+      selectedFormat = getFormat(fmtSelect.value);
     });
 
-    const tplStatus = document.createElement("span");
-    tplStatus.style.cssText = "font-size:0.75rem;color:#00ff88";
-    tplStatus.textContent = templateFileName;
+    fmtRow.append(fmtLabel, fmtSelect);
+    body.appendChild(fmtRow);
 
-    tplRow.append(tplLabel, tplInput, tplStatus);
-    body.appendChild(tplRow);
+    // Gamma row
+    const gammaRow = document.createElement("div");
+    gammaRow.className = "point-row";
+    gammaRow.style.cursor = "default";
+
+    const gammaLabel = document.createElement("label");
+    gammaLabel.style.cssText = "font-size:0.8rem;color:#aaa;white-space:nowrap";
+    gammaLabel.textContent = "Gamma";
+
+    const gammaInput = document.createElement("input");
+    gammaInput.type = "number";
+    gammaInput.min = "0";
+    gammaInput.max = "5";
+    gammaInput.step = "0.1";
+    gammaInput.value = gammaValue;
+    gammaInput.className = "edit-mode-select";
+    gammaInput.style.width = "5em";
+    gammaInput.addEventListener("change", () => {
+      gammaValue = parseFloat(gammaInput.value) || 2.2;
+    });
+
+    gammaRow.append(gammaLabel, gammaInput);
+    body.appendChild(gammaRow);
 
     // Include .txt row
     const txtRow = document.createElement("div");
@@ -1865,8 +1873,9 @@ async function doExport() {
     fps: detectedFPS || 30,
     inPoint,
     outPoint,
-    templateHeaderBuffer,
     includeTxt,
+    format: selectedFormat,
+    gamma: gammaValue,
     portPreviewCanvases,
     portDirty,
     processMultiPortPreviews,
@@ -1882,7 +1891,8 @@ function saveScene() {
     portsPerController, maxResolution, frameOffset, frameLength,
     detectedFPS, mediaType, mediaW, mediaH,
     frames, inPoint, outPoint,
-    templateHeaderBuffer, templateFileName,
+    selectedFormatName: selectedFormat?.name || "DM1812",
+    gamma: gammaValue,
     loadedImage,
   }, setStatus);
 }
@@ -1916,9 +1926,11 @@ function loadScene() {
     inPoint = result.inPoint;
     outPoint = result.outPoint;
 
-    if (result.templateHeaderBuffer) {
-      templateHeaderBuffer = result.templateHeaderBuffer;
-      templateFileName = result.templateFileName || "restored.dat";
+    if (result.selectedFormatName) {
+      selectedFormat = getFormat(result.selectedFormatName);
+    }
+    if (result.gamma != null) {
+      gammaValue = result.gamma;
     }
 
     const w = result.mediaW;

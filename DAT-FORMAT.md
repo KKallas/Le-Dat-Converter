@@ -22,13 +22,44 @@ Produced by LEDBuild software.
 | Offset | Size | Description |
 |--------|------|-------------|
 | 0x00 - 0x03 | 4 | Magic: `00 00 48 43` |
-| 0x04 - 0x0F | 12 | Config bytes (varies per setup — encodes IC type, port config, etc.) |
+| 0x04 - 0x07 | 4 | Fixed config: `40 40 0A 60` |
+| 0x08 - 0x0B | 4 | Controller-count config (byte 0x09 changes with controller count) |
+| 0x0C - 0x0F | 4 | File-specific hash (varies per export) |
 | 0x10 - 0x11 | 2 | Controller/slave count (uint16 LE). 1 = one H801RC, 2 = two, etc. |
-| 0x12 - 0x2B | 26 | Extended config (varies per setup) |
+| 0x12 - 0x2B | 26 | Format config + file hash (encodes IC type; varies per export) |
 | 0x2C - 0x1FF | 468 | Zero padding |
 
-Config and extended config bytes **change between setups**. They are NOT fixed
-constants. Use a **template header** from LEDBuild whenever possible.
+All three IC type formats (DM1812, DMX, QED3110) share the same magic and
+header structure. The IC type is encoded in the config bytes at 0x12+.
+
+### IC type identification
+
+The top 2 bits of byte 0x12 identify the IC type:
+
+| Bits 7-6 of byte 0x12 | IC type |
+|------------------------|---------|
+| `00` (0x00-0x1F) | DM1812 |
+| `01` (0x40-0x5F) | DMX512 |
+| `10` (0xA0-0xBF) | QED3110 |
+
+### Controller-count config (bytes 0x08-0x0B)
+
+Byte 0x09 changes with controller count but is the same across IC types:
+
+| Controllers | Byte 0x09 |
+|-------------|-----------|
+| 1 | `0x66` |
+| 2 | `0x0C` |
+
+Bytes 0x08, 0x0A, 0x0B remain `0x40`, `0x0A`, `0x60` respectively.
+
+### Non-reproducible bytes
+
+Bytes 0x0C-0x0F and parts of 0x12-0x2B contain file-specific values that
+change between exports from LEDBuild, even for the same format and
+configuration. These appear to be a hash or checksum. The controller
+hardware does not seem to validate them strictly — sample headers from
+known-good LEDBuild exports work reliably.
 
 ---
 
@@ -183,8 +214,24 @@ LED 0 example (16-byte groups):
 
 ---
 
+## IC Type Formats
+
+All three formats share the **same frame encoding** — reversed port byte order,
+BGR channel interleaving, and gamma 2.2 correction. The only difference between
+DM1812, DMX, and QED3110 is the header bytes that identify the IC type to the
+controller hardware.
+
+| Format | IC Type | Header difference |
+|--------|---------|-------------------|
+| DM1812 | DM1812 LED driver | Byte 0x12 top bits = `00` |
+| DMX | DMX512 protocol | Byte 0x12 top bits = `01` |
+| QED3110 | QED3110 LED driver | Byte 0x12 top bits = `10` |
+
+---
+
 ## Open Questions
 
 - Exact gamma curve: pure 2.2 power or custom lookup table? High-value deviation.
 - H801RA/H802RA (4 ports): same 8-byte stride or 4-byte stride?
-- What do the config bytes (0x04-0x2B) encode exactly?
+- Full meaning of the hash/config bytes at 0x0C-0x0F and 0x12-0x2B.
+- Controller-count byte 0x09 values for 3+ controllers.

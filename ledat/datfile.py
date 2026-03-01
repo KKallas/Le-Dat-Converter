@@ -1,13 +1,13 @@
 """
-DAT file writer for H803TC / H801RC / H802RA LED controllers.
+DAT file writer for LED controllers (DM1812, DMX, QED3110).
 
 Generates .dat files compatible with LEDBuild software and Huacan LED
 controller hardware.
 
 Format: 512-byte header, then frames padded to 512-byte boundaries.
 Each frame uses groups of (8 × controllerCount) bytes. Each LED uses
-3 consecutive groups for B, G, R channels. Within each controller's
-8-byte block, port N maps to byte position (8 - N).
+3 consecutive groups for B, G, R channels. Reversed port byte order:
+port N maps to byte (7 - N) within each controller's 8-byte block.
 
 Multi-controller: universes 0-7 → controller 1, 8-15 → controller 2, etc.
 """
@@ -19,12 +19,6 @@ from typing import Optional
 
 
 PORTS_PER_CONTROLLER = 8
-
-# Gamma 2.2 lookup table
-GAMMA_LUT = np.array(
-    [round(pow(i / 255.0, 2.2) * 255.0) for i in range(256)],
-    dtype=np.uint8,
-)
 
 
 class DATFile:
@@ -49,42 +43,27 @@ class DATFile:
     HEADER_SIZE = 512
     MAGIC = bytes([0x00, 0x00, 0x48, 0x43])  # "HC" signature
 
-    KNOWN_HEADERS: dict[tuple, bytes] = {}
+    @staticmethod
+    def build_gamma_lut(gamma: float) -> np.ndarray:
+        """Build a gamma lookup table for a given exponent."""
+        return np.array(
+            [round(pow(i / 255.0, gamma) * 255.0) for i in range(256)],
+            dtype=np.uint8,
+        )
 
-    # ------------------------------------------------------------------ #
-    # Class-level header registry
-    # ------------------------------------------------------------------ #
-
-    @classmethod
-    def register_header(cls, num_slaves: int, pixels_per_slave: int,
-                        header: bytes, ic_type: str = "QED3110") -> None:
-        """Register a known-working 512-byte header for a configuration."""
-        key = (num_slaves, pixels_per_slave, ic_type)
-        cls.KNOWN_HEADERS[key] = header[:cls.HEADER_SIZE]
-
-    @classmethod
-    def load_header_from_file(cls, dat_file: str, num_slaves: int,
-                               pixels_per_slave: int,
-                               ic_type: str = "QED3110") -> bytes:
-        """Load and register a header from an existing DAT file."""
-        with open(dat_file, "rb") as f:
-            header = f.read(cls.HEADER_SIZE)
-        cls.register_header(num_slaves, pixels_per_slave, header, ic_type)
-        return header
-
-    # ------------------------------------------------------------------ #
-    # Instance
-    # ------------------------------------------------------------------ #
-
-    def __init__(self, template_file: Optional[str] = None):
+    def __init__(self, format_descriptor: Optional[dict] = None,
+                 gamma: float = 2.2):
         """
         Create an empty DAT file builder.
 
         Args:
-            template_file: Optional path to a LEDBuild-generated DAT file
-                           whose 512-byte header will be reused on write.
+            format_descriptor: Optional format dict (from ``ledat.formats``).
+                               When *None*, falls back to legacy DM1812 defaults.
+            gamma: Gamma exponent for output encoding (default 2.2).
         """
-        self.template_file = template_file
+        self._format = format_descriptor
+        self._gamma = gamma
+        self._gamma_lut = self.build_gamma_lut(gamma)
 
         self._universes: list[int] = []       # LED count per universe
         self._num_frames: int = 0
@@ -225,31 +204,23 @@ class DATFile:
 
     # -- writing ------------------------------------------------------- #
 
-    def write(self, filename: str,
-              template_file: Optional[str] = None) -> int:
+    def write(self, filename: str) -> int:
         """
         Write the ``.dat`` file **and** an accompanying ``.txt`` summary.
 
         Args:
             filename: Output path (e.g. ``"output.dat"``).
-            template_file: Optional DAT file to copy the header from.
 
         Returns:
             Number of bytes written to the ``.dat`` file.
         """
-        template_header = None
-        tpl = template_file or self.template_file
-        if tpl:
-            with open(tpl, "rb") as tf:
-                template_header = tf.read(self.HEADER_SIZE)
-
         max_leds = self.max_leds_per_port
         grp_size = self.group_size
         frame_bytes = max_leds * 3 * grp_size
         frame_pad = (512 - frame_bytes % 512) % 512
 
         with open(filename, "wb") as f:
-            f.write(self._build_header(template_header))
+            f.write(self._build_header())
 
             for idx in range(self._num_frames):
                 f.write(self._build_frame(idx))
@@ -286,20 +257,19 @@ class DATFile:
                 f"Pixel {pixel} out of range [0, {self._universes[universe]})"
             )
 
-    def _build_header(self, template_header: Optional[bytes] = None) -> bytes:
-        """Build the 512-byte header. Byte 16-17 = controller/slave count."""
+    def _build_header(self) -> bytes:
+        """Build the 512-byte header.
+
+        Uses the format descriptor when available, otherwise falls back to
+        legacy DM1812 defaults.
+        """
         ctrl_count = self.controller_count
+        fmt = self._format
 
-        if template_header is not None:
-            hdr = bytearray(template_header[:self.HEADER_SIZE])
-            hdr[16] = ctrl_count & 0xFF
-            hdr[17] = (ctrl_count >> 8) & 0xFF
-            return bytes(hdr)
+        if fmt:
+            return fmt["build_header"](ctrl_count)
 
-        for key, hdr in self.KNOWN_HEADERS.items():
-            if key[0] == self.num_universes:
-                return bytes(hdr)
-
+        # Legacy fallback (DM1812 hardcoded)
         hdr = bytearray(self.HEADER_SIZE)
         hdr[0:4] = self.MAGIC
         hdr[4:16] = bytes([
@@ -323,24 +293,20 @@ class DATFile:
         """
         Build one frame with interleaved groups and BGR channel order.
 
-        Group size = 8 × controllerCount. Each LED uses 3 consecutive groups
-        (B, G, R). Within each controller's 8-byte block, port N (1-based
-        within that controller) maps to byte position (8 - N).
+        Reversed port byte order: port N → byte (7 - N) within each
+        controller's 8-byte block.
 
-        Universe uid maps to: controller = uid // 8, local port = (uid % 8) + 1,
-        byte offset within group = controller * 8 + (7 - uid % 8).
-
-        Values are gamma-corrected (gamma 2.2) before writing.
+        Values are gamma-corrected before writing.
         """
         max_leds = self.max_leds_per_port
         grp_size = self.group_size
         frame_bytes = max_leds * 3 * grp_size
         buf = bytearray(frame_bytes)
+        lut = self._gamma_lut
 
         for uid in range(self.num_universes):
             num_leds = self._universes[uid]
             rgb = self._pixel_data[uid][frame_idx]  # (num_leds, 3)
-            # controller index × 8 + (7 - local port index)
             ctrl_idx = uid // PORTS_PER_CONTROLLER
             local_port = uid % PORTS_PER_CONTROLLER
             byte_pos = ctrl_idx * PORTS_PER_CONTROLLER + (7 - local_port)
@@ -350,9 +316,9 @@ class DATFile:
 
                 # 3 groups per LED: B, G, R (each group is grp_size bytes)
                 group_base = led * 3 * grp_size
-                buf[group_base + byte_pos] = GAMMA_LUT[b]                          # B group
-                buf[group_base + grp_size + byte_pos] = GAMMA_LUT[g]               # G group
-                buf[group_base + 2 * grp_size + byte_pos] = GAMMA_LUT[r]           # R group
+                buf[group_base + byte_pos] = lut[b]                          # B group
+                buf[group_base + grp_size + byte_pos] = lut[g]               # G group
+                buf[group_base + 2 * grp_size + byte_pos] = lut[r]           # R group
 
         return bytes(buf)
 

@@ -11,8 +11,10 @@ import { buildZip, canvasToBlob, imageToJPEG } from "../core/utils.js";
  */
 export function serializeScene(state, previewFileMap) {
   const scene = {
-    version: 1,
+    version: 2,
     portsPerController: state.portsPerController,
+    selectedFormatName: state.selectedFormatName || "DM1812",
+    gamma: state.gamma ?? 2.2,
     maxResolution: state.maxResolution,
     frameOffset: state.frameOffset,
     frameLength: state.frameLength,
@@ -23,10 +25,6 @@ export function serializeScene(state, previewFileMap) {
     frameCount: state.frames.length,
     inPoint: state.inPoint,
     outPoint: state.outPoint,
-    templateHeader: state.templateHeaderBuffer
-      ? btoa(String.fromCharCode(...new Uint8Array(state.templateHeaderBuffer.slice(0, 512))))
-      : null,
-    templateFileName: state.templateFileName,
     controllers: state.controllers.map((ctrl) => ({
       collapsed: ctrl.collapsed,
       ports: ctrl.ports.map((port) => {

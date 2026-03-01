@@ -13,8 +13,8 @@ import { buildZip, downloadBlob } from "../core/utils.js";
  * @param {number} config.fps - frames per second
  * @param {number} config.inPoint - start frame index
  * @param {number} config.outPoint - end frame index
- * @param {ArrayBuffer|null} config.templateHeaderBuffer - template .dat header
  * @param {boolean} config.includeTxt - include .txt in zip
+ * @param {import("../../js/formats/registry.js").FormatDescriptor|null} config.format - output format
  * @param {Map} config.portPreviewCanvases - rendered preview canvases per port
  * @param {Set} config.portDirty - set of ports needing render
  * @param {function} config.processMultiPortPreviews - render dirty ports
@@ -25,7 +25,7 @@ import { buildZip, downloadBlob } from "../core/utils.js";
 export async function doExport(config) {
   const {
     ports, isImage, fps, inPoint, outPoint,
-    templateHeaderBuffer, includeTxt,
+    includeTxt, format, gamma,
     portPreviewCanvases, portDirty,
     processMultiPortPreviews,
     setStatus, setExporting, renderOutputSection,
@@ -55,10 +55,7 @@ export async function doExport(config) {
   setStatus("Building DAT file...");
   await new Promise((r) => setTimeout(r, 0));
 
-  const dat = new DATFile();
-  if (templateHeaderBuffer) {
-    dat.loadTemplateHeader(templateHeaderBuffer);
-  }
+  const dat = new DATFile(format || null, gamma ?? 2.2);
   for (const port of ports) {
     dat.addUniverse(port.leds);
   }

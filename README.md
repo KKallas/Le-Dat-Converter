@@ -66,9 +66,11 @@ This starts a local web server and opens the app in your browser at `http://loca
 
 8. **Loop blend** — Set the loop blend count to crossfade the last N frames with the first N frames for seamless looping. The blended result is used for playback and mapping.
 
-9. **Export** — Click **Export .dat** to download the binary file for your controller's SD card. Supports multi-controller setups (more than 8 ports).
+9. **Select format** — Choose the IC type format (DM1812, DMX, or QED3110) from the dropdown in the output section. This sets the correct header bytes for your LED driver IC.
 
-10. **Save/Load** — Save and restore entire scenes (media + all port configurations) as `.zip` files.
+10. **Export** — Click **Export .dat** to download the binary file for your controller's SD card. Supports multi-controller setups (more than 8 ports).
+
+11. **Save/Load** — Save and restore entire scenes (media + all port configurations) as `.zip` files.
 
 ### Architecture
 
@@ -94,6 +96,7 @@ The web app is pure static files with zero external dependencies. To serve it fr
    - `web/scene/` — `save.js`, `load.js`
    - `web/output/` — `export.js`
    - `js/datfile.js`
+   - `js/formats/` — `registry.js`, `dm1812.js`, `dmx.js`, `qed3110.js`
 2. Serve them with any ESP32 HTTP server library, keeping the same directory structure.
 
 ---
@@ -112,10 +115,12 @@ Requires Python 3.10+ and NumPy.
 
 ```python
 from ledat import DATFile
+from ledat.formats import get_format
 
-dat = DATFile()
-dat.add_universe(400)   # universe 0: 400 LEDs
-dat.add_universe(200)   # universe 1: 200 LEDs
+fmt = get_format("DMX")        # or "DM1812", "QED3110"
+dat = DATFile(format_descriptor=fmt)
+dat.add_universe(400)           # universe 0: 400 LEDs
+dat.add_universe(200)           # universe 1: 200 LEDs
 dat.set_num_frames(60)
 
 dat.set_pixel(0, 0, 0, 255, 0, 0)   # universe 0, frame 0, pixel 0 = red (linear RGB)
@@ -126,13 +131,13 @@ r, g, b = dat.get_pixel(0, 0, 0)    # (255, 0, 0)
 dat.write("output.dat")  # also writes output.txt (gamma 2.2 applied automatically)
 ```
 
-Multi-controller setups are handled automatically — adding more than 8 universes creates additional controllers.
+Multi-controller setups are handled automatically — adding more than 8 universes creates additional controllers. Available formats: `DM1812` (default), `DMX`, `QED3110`.
 
 ### Python API
 
 | Method | Description |
 |---|---|
-| `DATFile(template_file=None)` | Create an empty builder. Optional LEDBuild `.dat` file for header reuse. |
+| `DATFile(format_descriptor=None)` | Create an empty builder. Pass a format dict from `ledat.formats` to select IC type. |
 | `dat.add_universe(num_leds) -> int` | Add a universe. Returns 0-based index. |
 | `dat.set_num_frames(n)` | Set global frame count. New pixels default to black. |
 | `dat.set_pixel(universe, frame, pixel, r, g, b)` | Set a pixel's RGB colour (0-255). |
@@ -140,7 +145,7 @@ Multi-controller setups are handled automatically — adding more than 8 univers
 | `dat.append(frames, universe)` | Append NumPy frame data `(frames, pixels, 3)` to a universe. |
 | `dat.write(filename) -> int` | Write `.dat` + `.txt` summary. Returns bytes written. |
 | `dat.clear()` | Clear frame data, keep universe config. |
-| `DATFile.load_header_from_file(dat_file, ...)` | Class method: load and register a template header from an existing `.dat` file. |
+| `get_format(name) -> dict` | Look up a format descriptor by name (`"DM1812"`, `"DMX"`, `"QED3110"`). |
 
 Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.max_leds_per_port`, `dat.controller_count`, `dat.group_size`, `dat.universe_leds(i)`
 
@@ -153,8 +158,10 @@ Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.max_
 ```html
 <script type="module">
   import { DATFile } from "./js/datfile.js";
+  import { getFormat } from "./js/formats/registry.js";
 
-  const dat = new DATFile();
+  const fmt = getFormat("DMX");  // or "DM1812", "QED3110"
+  const dat = new DATFile(fmt);
   dat.addUniverse(400);
   dat.setNumFrames(60);
 
@@ -167,7 +174,7 @@ Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.max_
 
 | Method | Description |
 |---|---|
-| `new DATFile()` | Create an empty builder. |
+| `new DATFile(format?)` | Create an empty builder. Pass a format descriptor to select IC type. |
 | `dat.addUniverse(numLeds): number` | Add a universe. Returns 0-based index. |
 | `dat.setNumFrames(n)` | Set global frame count. New pixels default to black. |
 | `dat.setPixel(universe, frame, pixel, r, g, b)` | Set a pixel's RGB colour (0-255). |
@@ -177,8 +184,8 @@ Properties: `dat.num_universes`, `dat.num_frames`, `dat.total_pixels`, `dat.max_
 | `dat.toTxt(): string` | Generate the `.txt` summary string. |
 | `dat.download(filename?)` | Trigger a browser download of the `.dat` file. |
 | `dat.downloadTxt(filename?)` | Trigger a browser download of the `.txt` summary. |
-| `dat.loadTemplateHeader(arrayBuffer)` | Load a 512-byte header from an existing `.dat` file. |
 | `dat.clear()` | Clear frame data, keep universe config. |
+| `getFormat(name): FormatDescriptor` | Look up a format by name (`"DM1812"`, `"DMX"`, `"QED3110"`). |
 
 Properties: `dat.numUniverses`, `dat.numFrames`, `dat.totalPixels`, `dat.maxLedsPerPort`, `dat.controllerCount`, `dat.groupSize`, `dat.universeLeds(i)`
 
@@ -241,9 +248,19 @@ Le-Dat-Converter/
       export.js             # build DATFile from rendered previews
   js/
     datfile.js              # JavaScript DATFile class (ES module)
+    formats/
+      registry.js           # format lookup (getFormat, formats, defaultFormat)
+      dm1812.js             # DM1812 format descriptor
+      dmx.js                # DMX format descriptor
+      qed3110.js            # QED3110 format descriptor
   ledat/
     __init__.py
     datfile.py              # Python DATFile class
+    formats/
+      __init__.py           # auto-discovery registry (get_format, FORMATS)
+      dm1812.py             # DM1812 format descriptor
+      dmx.py                # DMX format descriptor
+      qed3110.py            # QED3110 format descriptor
   examples/
     demo.py                 # Python usage example
   start_server.py           # local dev server

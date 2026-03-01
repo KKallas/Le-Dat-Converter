@@ -1,20 +1,20 @@
 /**
- * DAT file writer for H803TC / H801RC / H802RA LED controllers.
+ * DAT file writer for LED controllers (DM1812, DMX, QED3110).
  *
  * Generates .dat blobs compatible with LEDBuild software and Huacan LED
  * controller hardware.
  *
  * Format: 512-byte header, then frames padded to 512-byte boundaries.
  * Each frame uses groups of (8 × controllerCount) bytes. Each LED uses
- * 3 consecutive groups for B, G, R channels. Within each controller's
- * 8-byte block, port N maps to byte position (8 - N).
+ * 3 consecutive groups for B, G, R channels. Reversed port byte order:
+ * port N maps to byte (7 - N) within each controller's 8-byte block.
  *
  * Multi-controller: universes 0–7 → controller 1, 8–15 → controller 2, etc.
  *
  * @example
- *   const dat = new DATFile();
- *   dat.addUniverse(400);   // universe 0 = ctrl 1, port 1
- *   dat.addUniverse(400);   // universe 1 = ctrl 1, port 2
+ *   import dm1812 from "./formats/dm1812.js";
+ *   const dat = new DATFile(dm1812);
+ *   dat.addUniverse(400);
  *   dat.setNumFrames(60);
  *   dat.setPixel(0, 0, 0, 255, 0, 0);
  *   const blob = dat.toBlob();
@@ -23,31 +23,32 @@
 const HEADER_SIZE = 512;
 const PORTS_PER_CONTROLLER = 8;
 
-const MAGIC = new Uint8Array([0x00, 0x00, 0x48, 0x43]); // "HC"
-
-const CONFIG_BYTES = new Uint8Array([
-  0x40, 0x40, 0x0a, 0x60, 0x40, 0x4a, 0x0a, 0x60,
-  0x04, 0x08, 0x50, 0x32,
-]);
-
-const EXTENDED_CONFIG = new Uint8Array([
-  0xb3, 0x2f, 0x76, 0x45, 0x28, 0x02, 0x83, 0xac,
-  0xe3, 0x00, 0x04, 0xdf, 0x67, 0x43, 0x11, 0x40,
-  0x08, 0xa0, 0xaf, 0xaf, 0xf5, 0xe9, 0xb4, 0xfb,
-  0x15, 0x55, 0xb1, 0xaf, 0x7c, 0x45, 0x32, 0x22,
-  0x85, 0xec, 0xec, 0x20, 0x0b, 0x9f, 0x7c, 0x03,
-  0x17, 0x40, 0x0e, 0xe0, 0xb9, 0x8f, 0x83, 0x31,
-  0x52, 0x70, 0x50, 0x55,
-]);
-
-// Gamma 2.2 lookup table
-const GAMMA_LUT = new Uint8Array(256);
-for (let i = 0; i < 256; i++) {
-  GAMMA_LUT[i] = Math.round(Math.pow(i / 255, 2.2) * 255);
-}
-
 export class DATFile {
-  constructor() {
+  /**
+   * Build a gamma lookup table for a given exponent.
+   * @param {number} gamma
+   * @returns {Uint8Array} 256-entry LUT
+   */
+  static buildGammaLut(gamma) {
+    const lut = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      lut[i] = Math.round(Math.pow(i / 255, gamma) * 255);
+    }
+    return lut;
+  }
+
+  /**
+   * @param {import("./formats/registry.js").FormatDescriptor|null} [format=null]
+   *   Format descriptor. When null, falls back to legacy DM1812 defaults.
+   * @param {number} [gamma=2.2] Gamma exponent for output encoding.
+   */
+  constructor(format = null, gamma = 2.2) {
+    /** @type {import("./formats/registry.js").FormatDescriptor|null} */
+    this._format = format;
+    /** @type {number} */
+    this._gamma = gamma;
+    /** @type {Uint8Array} */
+    this._gammaLut = DATFile.buildGammaLut(gamma);
     /** @type {number[]} LED count per universe (universe = port) */
     this._universes = [];
     /** @type {number} */
@@ -59,8 +60,6 @@ export class DATFile {
      * @type {Uint8Array[]}
      */
     this._pixelData = [];
-    /** @type {Uint8Array|null} */
-    this._templateHeader = null;
   }
 
   // -- properties ------------------------------------------------------- //
@@ -98,17 +97,6 @@ export class DATFile {
 
   universeLeds(universe) {
     return this._universes[universe];
-  }
-
-  // -- template header -------------------------------------------------- //
-
-  /**
-   * Load a template header from an existing .dat file's ArrayBuffer.
-   * The first 512 bytes are kept and reused when building the output.
-   * @param {ArrayBuffer} buffer
-   */
-  loadTemplateHeader(buffer) {
-    this._templateHeader = new Uint8Array(buffer.slice(0, HEADER_SIZE));
   }
 
   // -- building the animation ------------------------------------------- //
@@ -292,26 +280,36 @@ export class DATFile {
 
   /**
    * Build the 512-byte header.
-   * Byte 16-17 = controller/slave count (uint16 LE).
+   * Uses the format descriptor when available, otherwise falls back to
+   * legacy DM1812 defaults.
    * @private
    */
   _buildHeader() {
-    const hdr = new Uint8Array(HEADER_SIZE);
     const ctrlCount = this.controllerCount;
+    const fmt = this._format;
 
-    if (this._templateHeader) {
-      hdr.set(this._templateHeader.subarray(0, HEADER_SIZE));
-      hdr[16] = ctrlCount & 0xff;
-      hdr[17] = (ctrlCount >> 8) & 0xff;
-      return hdr;
+    if (fmt) {
+      return fmt.buildHeader(ctrlCount);
     }
 
-    hdr.set(MAGIC, 0);
-    hdr.set(CONFIG_BYTES, 4);
+    // Legacy fallback (DM1812 hardcoded)
+    const hdr = new Uint8Array(HEADER_SIZE);
+    hdr.set(new Uint8Array([0x00, 0x00, 0x48, 0x43]), 0);
+    hdr.set(new Uint8Array([
+      0x40, 0x40, 0x0a, 0x60, 0x40, 0x4a, 0x0a, 0x60,
+      0x04, 0x08, 0x50, 0x32,
+    ]), 4);
     hdr[16] = ctrlCount & 0xff;
     hdr[17] = (ctrlCount >> 8) & 0xff;
-    hdr.set(EXTENDED_CONFIG, 18);
-
+    hdr.set(new Uint8Array([
+      0xb3, 0x2f, 0x76, 0x45, 0x28, 0x02, 0x83, 0xac,
+      0xe3, 0x00, 0x04, 0xdf, 0x67, 0x43, 0x11, 0x40,
+      0x08, 0xa0, 0xaf, 0xaf, 0xf5, 0xe9, 0xb4, 0xfb,
+      0x15, 0x55, 0xb1, 0xaf, 0x7c, 0x45, 0x32, 0x22,
+      0x85, 0xec, 0xec, 0x20, 0x0b, 0x9f, 0x7c, 0x03,
+      0x17, 0x40, 0x0e, 0xe0, 0xb9, 0x8f, 0x83, 0x31,
+      0x52, 0x70, 0x50, 0x55,
+    ]), 18);
     return hdr;
   }
 
@@ -319,13 +317,10 @@ export class DATFile {
    * Build one frame with interleaved groups and BGR channel order.
    *
    * Group size = 8 × controllerCount. Each LED uses 3 consecutive groups
-   * (B, G, R). Within each controller's 8-byte block, port N (1-based
-   * within that controller) maps to byte position (8 - N).
+   * (B, G, R). Reversed port byte order: port N → byte (7 - N) within
+   * each controller's 8-byte block.
    *
-   * Universe uid maps to: controller = floor(uid / 8), local port = (uid % 8) + 1,
-   * byte offset within group = controller * 8 + (7 - uid % 8).
-   *
-   * Values are gamma-corrected (gamma 2.2) before writing.
+   * Values are gamma-corrected before writing.
    * @private
    */
   _buildFrame(frameIdx) {
@@ -333,11 +328,11 @@ export class DATFile {
     const grpSize = this.groupSize;
     const frameBytes = maxLeds * 3 * grpSize;
     const buf = new Uint8Array(frameBytes);
+    const lut = this._gammaLut;
 
     for (let uid = 0; uid < this.numUniverses; uid++) {
       const numLeds = this._universes[uid];
       const srcBase = frameIdx * numLeds * 3;
-      // controller index × 8 + (7 - local port index)
       const ctrlIdx = (uid / PORTS_PER_CONTROLLER) | 0;
       const localPort = uid % PORTS_PER_CONTROLLER;
       const bytePos = ctrlIdx * PORTS_PER_CONTROLLER + (7 - localPort);
@@ -350,9 +345,9 @@ export class DATFile {
 
         // 3 groups per LED: B, G, R (each group is grpSize bytes)
         const groupBase = led * 3 * grpSize;
-        buf[groupBase + bytePos] = GAMMA_LUT[b];                    // B group
-        buf[groupBase + grpSize + bytePos] = GAMMA_LUT[g];          // G group
-        buf[groupBase + 2 * grpSize + bytePos] = GAMMA_LUT[r];      // R group
+        buf[groupBase + bytePos] = lut[b];                    // B group
+        buf[groupBase + grpSize + bytePos] = lut[g];          // G group
+        buf[groupBase + 2 * grpSize + bytePos] = lut[r];      // R group
       }
     }
 
