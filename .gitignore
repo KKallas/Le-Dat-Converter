@@ -18,6 +18,9 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Confidential
+BUDGET-DETAIL.md
+
 # Output files
 *.dat
 *.txt

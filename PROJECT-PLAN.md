@@ -201,7 +201,7 @@ Central server that stores animations, manages nodes, and serves the front-end a
 
 ---
 
-## Timeline — 48 Weeks
+## Timeline — 49 Weeks
 
 Working at **60% capacity** (~3 days/week). Calendar weeks include the 60% factor. The mapping tool (Phase 0) was completed in 1 week at full speed as a reference.
 
@@ -209,19 +209,19 @@ Working at **60% capacity** (~3 days/week). Calendar weeks include the 60% facto
 
 | Phase | System | Deadline | Depends on |
 |-------|--------|----------|------------|
-| **P1** | DAT File Software | done | — |
-| **P2** | Slave Control System | Wk 12 | P1 |
-| **P3** | Master Control System | Wk 20 | P2 |
-| **P4** | Grid Preview System | Wk 28 | P3 |
-| **P5** | Trigger System | Wk 36 | P4 |
-| **P6** | Finger Paint System | Wk 42 | P4 |
-| **P7** | Controller Management & Field Test | Wk 48 | All |
+| **P1** | DAT File Software | Wk 1 (mockup approval) | — |
+| **P2** | Slave Control System | Wk 13 | P1 |
+| **P3** | Grid Preview System | Wk 21 | P2 |
+| **P4** | Master Control System | Wk 29 | P3 |
+| **P5** | Trigger System | Wk 37 | P4 |
+| **P6** | Finger Paint System | Wk 43 | P4 |
+| **P7** | Controller Management & Field Test | Wk 49 | All |
 
 ---
 
-### Phase 1 — DAT File Software ✅
+### Phase 1 — DAT File Software
 
-**Status:** Done
+**Status:** Pending — awaiting matrix mockup approval
 
 Software tool to convert video/images into .dat animation files for LED controllers.
 
@@ -241,7 +241,7 @@ Software tool to convert video/images into .dat animation files for LED controll
 
 ### Phase 2 — Slave Control System
 
-**Deadline:** Wk 12
+**Deadline:** Wk 13
 
 The physical DMX node hardware: PCB design, enclosure, ESP32 + RP2040 firmware, and 50 assembled units. After this phase, you have boxes that receive data over WiFi and output DMX to LED strips.
 
@@ -259,9 +259,31 @@ Includes: hardware design, PCB fabrication, 3D enclosure, node firmware (ESP32 W
 
 ---
 
-### Phase 3 — Master Control System
+### Phase 3 — Grid Preview System
 
-**Deadline:** Wk 20
+**Deadline:** Wk 21
+
+Customer-facing animation selection screen and live preview from the mapping tool. After this phase, a customer can scan a QR code, browse animations in a grid, tap to play one, and the mapping tool can preview directly to hardware.
+
+Includes: front-end mockup (for approval), grid view, mapping tool live preview.
+
+**Acceptance checklist — is it done?**
+
+- [ ] Scan the decoration's QR code with any phone. Does a grid view open up?
+- [ ] Touch and hold a thumbnail. Does an animated preview play?
+- [ ] Tap a thumbnail. Do the actual LEDs on the decoration change to that animation?
+- [ ] Does the selected animation play fullscreen on the phone?
+- [ ] Try on an iPhone (Safari). Does everything work?
+- [ ] Try on an Android phone (Chrome). Does everything work?
+- [ ] Try on a desktop browser. Does everything work?
+- [ ] Open Le-Dat-Converter, load a scene, click "Live Preview". Do the LEDs update as you move points around?
+- [ ] Is the live preview smooth (no visible stutter)?
+
+---
+
+### Phase 4 — Master Control System
+
+**Deadline:** Wk 29
 
 The central server running on the phone, WiFi access point, QR code access, and remote tunnel. After this phase, the full infrastructure works: phone stores and streams animations to nodes, customers can connect via QR code.
 
@@ -282,31 +304,9 @@ Includes: ESP32 AP firmware (captive portal), media server (FastAPI, animation s
 
 ---
 
-### Phase 4 — Grid Preview System
-
-**Deadline:** Wk 28
-
-Customer-facing animation selection screen and live preview from the mapping tool. After this phase, a customer can scan a QR code, browse animations in a grid, tap to play one, and the mapping tool can preview directly to hardware.
-
-Includes: front-end mockup (for approval), grid view, mapping tool live preview.
-
-**Acceptance checklist — is it done?**
-
-- [ ] Scan the decoration's QR code with any phone. Does a grid view open up?
-- [ ] Touch and hold a thumbnail. Does an animated preview play?
-- [ ] Tap a thumbnail. Do the actual LEDs on the decoration change to that animation?
-- [ ] Does the selected animation play fullscreen on the phone?
-- [ ] Try on an iPhone (Safari). Does everything work?
-- [ ] Try on an Android phone (Chrome). Does everything work?
-- [ ] Try on a desktop browser. Does everything work?
-- [ ] Open Le-Dat-Converter, load a scene, click "Live Preview". Do the LEDs update as you move points around?
-- [ ] Is the live preview smooth (no visible stutter)?
-
----
-
 ### Phase 5 — Trigger System
 
-**Deadline:** Wk 36
+**Deadline:** Wk 37
 
 Scheduling, automation, and the sequence editor. After this phase, animations can run on a schedule and users can build custom sequences from effects.
 
@@ -329,7 +329,7 @@ Includes: natural language trigger input (LLM-powered), calendar UI, scheduler b
 
 ### Phase 6 — Finger Paint System
 
-**Deadline:** Wk 42
+**Deadline:** Wk 43
 
 Live drawing tool — paint on the LED decoration in real-time from a phone or tablet.
 
@@ -351,7 +351,7 @@ Includes: canvas editor, brush tools, color picker, stencils, real-time streamin
 
 ### Phase 7 — Controller Management & Field Test
 
-**Deadline:** Wk 48
+**Deadline:** Wk 49
 
 Admin tools for managing the node network, firmware updates, and end-to-end field testing on a real outdoor installation.
 
@@ -369,31 +369,31 @@ Includes: controller config UI (node list, addressing, health, OTA), field deplo
 - [ ] Deploy the full system on a real outdoor decoration. Does everything work end-to-end?
 - [ ] Leave it running for 48 hours. Does it stay stable (no crashes, no memory leaks, auto-reconnects)?
 
-### Schedule (48 weeks, Gantt-style)
+### Schedule (49 weeks, Gantt-style)
 
 ```
-Week  1         10        20        30        40       48
-      |---------|---------|---------|---------|--------|
-P1  ■ done (DAT file software)
-P2  ████████████ slave control system
-P3            ████████████ master control system
-P4                      ████████ grid preview system
-P5                              ████████ trigger system
-P6                                  ████████ finger paint system
-P7                                          ████████ controller mgmt + field test
+Week  1         10        20        30        40       49
+      |---------|---------|---------|---------|---------|
+P1  █ DAT file software (mockup approval)
+P2   █████████████ slave control system
+P3              ████████ grid preview system
+P4                        ████████████ master control system
+P5                                ████████ trigger system
+P6                                    ████████ finger paint system
+P7                                            █████████ controller mgmt + field test
 ```
 
 ### Critical path
 
 ```
-P1 (done) → P2 (slave) → P3 (master) → P4 (grid preview) → P7 (mgmt + field test)
-                                              │
-                                              ├→ P5 (triggers)
-                                              └→ P6 (finger paint)
+P1 (pending) → P2 (slave) → P3 (grid preview) → P4 (master) → P7 (mgmt + field test)
+                                                    │
+                                                    ├→ P5 (triggers)
+                                                    └→ P6 (finger paint)
 ```
 ```
 
-**P1 (mockup) is the first gate** — stakeholder approval before committing to build. Hardware design (P2) starts in parallel during Wk 2 so PCBs arrive by Wk 10. **P4 + P5 are the critical software path** — working nodes and server unlock everything else. First physical DMX output targets **Wk 12** (prototype boards + firmware ready).
+**P1 (matrix mockup approval) is the first gate** — stakeholder approval before committing to build. Hardware design (P2) starts in Wk 2 so PCBs arrive by Wk 11. **P3 (grid preview) starts right after slaves** — front-end software work can begin while master hardware is developed in P4. First physical DMX output targets **Wk 13** (prototype boards + firmware ready).
 
 ---
 
@@ -522,93 +522,13 @@ RP2040 PIO pin → 6N137 optocoupler → MAX3485 RS-485 driver → SMBJ6.0A TVS 
 
 ---
 
-## Budget — 50 Test Units (DMX Node)
+## Development Investment
 
-Proposed budget for building the first 50 8-port DMX nodes for field testing. Electronics design (schematic, PCB layout) and mechanical design (enclosure CAD, 3D printing) are covered under project salary. This budget covers materials, fabrication, and external consulting only.
-
-### 1. Components & PCB Fabrication
-
-| Item | Cost |
-|------|------|
-| Electronic components (BOM × 50) | $1,100 |
-| PCB fabrication + SMT assembly (JLCPCB) | $225 |
-| Connectors (RJ45, terminals, headers) | $185 |
-| Prototype run (5 boards before batch) | $200 |
-| Spare parts buffer (10%) | $150 |
-| Shipping (LCSC/JLCPCB) | $80 |
-| **Subtotal** | **$1,940** |
-
-### 2. Enclosure Materials
-
-| Item | Cost |
-|------|------|
-| Filament/material (PETG or ASA for outdoor use) | $300 |
-| Gaskets/seals for IP65 rating | $150 |
-| Hardware (screws, standoffs, cable glands) | $200 |
-| **Subtotal** | **$650** |
-
-### 3. External Consulting — Electrical
-
-| Item | Cost |
-|------|------|
-| EE review (schematic + PCB sign-off) | $1,500 |
-| EMC pre-compliance check | $1,500 |
-| 230V safety review (if adding mains power) | $1,000 |
-| General troubleshooting buffer | $1,000 |
-| **Subtotal** | **$5,000** |
-
-### 4. External Consulting — Mechanical Design & Packaging
-
-| Item | Cost |
-|------|------|
-| Enclosure design review (IP65, thermal, structural) | $1,000 |
-| Packaging design (labeling, print templates, boxing) | $1,000 |
-| Material/process consultation (outdoor durability) | $1,000 |
-| **Subtotal** | **$3,000** |
-
-### Budget Summary (50 test units)
+The full development (firmware, media server, front-end, admin panel, hardware design) is required to make the DMX node a functional product. All phases are amortized into the unit cost. See [BUDGET-DETAIL.md](BUDGET-DETAIL.md) for the full breakdown.
 
 | Category | Cost |
 |----------|------|
-| Components & PCB fabrication | €1,800 |
-| Enclosure materials | €600 |
-| Consulting — electrical | €4,650 |
-| Consulting — mechanical & packaging | €2,790 |
-| **Total materials + consulting** | **€9,840** |
-
-### Development Investment
-
-The full development (firmware, media server, front-end, admin panel, hardware design) is required to make the DMX node a functional product. All phases are amortized into the unit cost.
-
-| Item | Cost |
-|------|------|
-| Salary (employer cost: €4,800/month × 12 months × 60%) | €34,560 |
-| Materials + consulting (50 test units) | €9,840 |
-| **Total development investment** | **€44,400** |
-
-### Production Unit Cost (200 pc/batch)
-
-At 200-unit batch volumes, component and fabrication costs drop with volume pricing.
-
-| Item | Per unit |
-|------|----------|
-| Electronic components (volume pricing) | €13 |
-| PCB fabrication + SMT assembly | €3 |
-| Connectors (RJ45, terminals, headers) | €3 |
-| Enclosure (3D printed PETG/ASA) | €4 |
-| Gaskets, seals, cable glands | €2 |
-| Hardware (screws, standoffs) | €2 |
-| Shipping + overhead | €1 |
-| **Production cost per unit** | **€28** |
-
-Cost per 200-unit batch: **€5,600**
-
-### Unit Cost with Development Amortized (10,000 units)
-
-| | Per unit | Notes |
-|--|----------|-------|
-| Production cost | €28 | 200 pc/batch |
-| Development amortized | €4.44 | €44,400 ÷ 10,000 |
-| **Total cost per unit** | **€32.44** | |
-
-At 10K units with injection-molded enclosures (~€4,000 tooling), production cost drops to ~€22/unit → **€26.44/unit** fully loaded.
+| Salary costs | €55,560 |
+| Service costs | €14,880 |
+| Parts, tools, materials | €2,400 |
+| **Total development investment** | **€72,840** |
