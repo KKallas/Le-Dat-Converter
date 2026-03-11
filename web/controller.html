@@ -1,0 +1,2317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>LED Controller</title>
+<style>
+/* ------------------------------------------------------------------ */
+/* Reset & tokens                                                      */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-body:   #1c1c1c;
+  --bg-panel:  #2a2a2a;
+  --bg-card:   #333;
+  --border:    #444;
+  --text:      #d4d4d4;
+  --text-dim:  #888;
+  --accent:    #d4832f;
+  --accent-h:  #b56a1e;
+  --btn:       #3a3a3a;
+  --btn-h:     #4a4a4a;
+  --radius:    8px;
+  --tab-h:     52px;
+  --safe-b:    env(safe-area-inset-bottom, 0px);
+}
+
+html, body { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-body);
+  color: var(--text);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+button { font: inherit; color: inherit; border: none; cursor: pointer; }
+input, select { font: inherit; color: var(--text); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+label { font-size: 0.8rem; color: var(--text-dim); }
+
+/* ------------------------------------------------------------------ */
+/* Top header (laptop only)                                            */
+/* ------------------------------------------------------------------ */
+.app-header {
+  display: none;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  align-items: center;
+  gap: 24px;
+  height: var(--tab-h);
+  flex-shrink: 0;
+}
+.app-header h1 { font-size: 1rem; white-space: nowrap; color: #fff; }
+
+@media (min-width: 900px) {
+  .app-header { display: flex; }
+  .tabs--bottom { display: none !important; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tab bars                                                            */
+/* ------------------------------------------------------------------ */
+.tabs {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.tabs button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  transition: color .15s, background .15s;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tabs button:hover { color: var(--text); }
+.tabs button .icon { font-size: 1.2rem; line-height: 1; }
+
+/* Top tabs (inside header) */
+.tabs--top button {
+  flex-direction: row;
+  gap: 6px;
+  font-size: 0.8rem;
+  padding: 0 14px;
+  height: 100%;
+}
+
+/* Bottom tabs (mobile / RPi) */
+.tabs--bottom {
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--safe-b);
+}
+
+@media (min-width: 900px) { .tabs--bottom { display: none; } }
+
+/* ------------------------------------------------------------------ */
+/* Room container                                                      */
+/* ------------------------------------------------------------------ */
+.room-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+.room {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: none;
+  flex-direction: column;
+}
+.room.active { display: flex; }
+
+/* ------------------------------------------------------------------ */
+/* Shared components                                                   */
+/* ------------------------------------------------------------------ */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--btn);
+  font-size: 0.8rem;
+  transition: background .15s;
+}
+.btn:hover { background: var(--btn-h); }
+.btn--accent { background: var(--accent); }
+.btn--accent:hover { background: var(--accent-h); }
+.btn--sm { padding: 4px 10px; font-size: 0.7rem; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.badge--time { background: #3a3a3a; color: #ccc; }
+.badge--artnet { background: #3a3a3a; color: #ccc; }
+.badge--api { background: #3a3a3a; color: #ccc; }
+
+.section-title {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 11px;
+  border: none;
+  cursor: pointer;
+  transition: background .2s;
+  flex-shrink: 0;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform .2s;
+}
+.toggle:checked { background: var(--accent); }
+.toggle:checked::after { transform: translateX(18px); }
+
+/* ------------------------------------------------------------------ */
+/* Room 1: Select Animation                                            */
+/* ------------------------------------------------------------------ */
+
+/* Mobile: scroll-snap full-screen swipe */
+.anim-swipe {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  gap: 0;
+  height: 100%;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.anim-swipe::-webkit-scrollbar { display: none; }
+
+.anim-swipe .anim-slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.anim-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: rgba(255,255,255,0.3);
+  border-radius: 0;
+}
+
+.anim-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 40px 16px 16px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1;
+}
+
+.anim-info {
+  text-align: center;
+}
+.anim-info h3 { font-size: 1rem; margin-bottom: 4px; color: #fff; }
+.anim-info p { font-size: 0.75rem; color: rgba(255,255,255,0.7); }
+
+.anim-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.swipe-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 0;
+}
+.swipe-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.swipe-dots span.active { background: var(--accent); }
+
+/* Desktop: grid */
+.anim-grid { display: none; }
+
+@media (min-width: 600px) and (min-height: 500px) {
+  .anim-swipe { display: none; }
+  .anim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+  /* Hide grid when detail view is open */
+  .anim-grid.hidden { display: none; }
+  .anim-card {
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .anim-card:hover { border-color: var(--accent); }
+  .anim-card .thumb {
+    aspect-ratio: 16/10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--text-dim);
+  }
+  .anim-card .meta {
+    padding: 8px;
+  }
+  .anim-card .meta h3 { font-size: 0.8rem; margin-bottom: 2px; }
+  .anim-card .meta p { font-size: 0.65rem; color: var(--text-dim); }
+  .anim-card .card-actions {
+    display: flex;
+    gap: 4px;
+    padding: 0 8px 8px;
+  }
+}
+
+@media (min-width: 900px) {
+  .anim-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+}
+
+/* Detail view (desktop: shown on card click; replaces grid) */
+.anim-detail {
+  display: none;
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+.anim-detail.open {
+  display: block;
+}
+.anim-detail .detail-preview {
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: rgba(255,255,255,0.3);
+}
+.anim-detail .detail-overlay-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
+  z-index: 1;
+}
+.anim-detail .detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.anim-detail .detail-toolbar .detail-title {
+  flex: 1;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+}
+.anim-detail .detail-toolbar .detail-desc {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.7);
+}
+.anim-detail .detail-overlay-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 40px 16px 16px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.anim-detail .detail-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.anim-detail .detail-nav {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Context bar (shows selected animation / effect breadcrumb)          */
+/* ------------------------------------------------------------------ */
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  margin: -12px -12px 12px;
+}
+.context-bar .context-label { color: var(--text-dim); }
+.context-bar .context-name { color: var(--accent); font-weight: 600; }
+.context-bar .context-sep { color: var(--text-dim); font-size: 0.7rem; }
+.context-bar .btn { margin-left: auto; }
+
+/* Trigger animation badge (shown on each card when no filter) */
+.trigger-anim-badge {
+  font-size: 0.6rem;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Room 2: Animation Editor                                            */
+/* ------------------------------------------------------------------ */
+.editor-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+}
+
+.editor-preview {
+  flex: 0 0 40%;
+  min-height: 100px;
+  background: #000;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  position: relative;
+}
+
+.editor-preview .live-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+/* Transport bar overlaid at bottom of preview */
+.editor-transport {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 12px 10px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 60%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.transport-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.transport-controls .transport-btn {
+  background: transparent;
+  color: #fff;
+  font-size: 1.1rem;
+  padding: 2px 4px;
+  line-height: 1;
+}
+.transport-controls .transport-btn:hover { color: var(--accent); }
+.transport-controls .transport-time {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.7);
+  font-family: monospace;
+  min-width: 90px;
+}
+.transport-scrub {
+  width: 100%;
+  height: 8px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 4px;
+  position: relative;
+  cursor: pointer;
+  touch-action: none;
+}
+.transport-scrub .scrub-fill {
+  height: 100%;
+  background: transparent;
+  border-radius: 4px;
+  width: 0%;
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+}
+.transport-scrub .scrub-handle {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+/* Clip segments inside scrub bar */
+.transport-scrub .scrub-segments {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.transport-scrub .scrub-seg {
+  height: 100%;
+  border-right: 1px solid rgba(0,0,0,0.3);
+}
+.transport-scrub .scrub-seg:last-child { border-right: none; }
+
+/* Active clip indicator on the clip list */
+.clip-row.playing {
+  position: relative;
+}
+.clip-row.playing::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+
+.editor-clips-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.editor-clips-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.clip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  transition: border-color .15s;
+  cursor: pointer;
+}
+.clip-row:hover { border-color: var(--accent); }
+.clip-row.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.clip-row .clip-index {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  min-width: 20px;
+  text-align: center;
+}
+.clip-row .clip-effect {
+  flex: 1;
+  min-width: 0;
+}
+.clip-row .clip-effect select {
+  width: 100%;
+  padding: 5px 7px;
+  font-size: 0.8rem;
+}
+.clip-row .clip-duration {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.clip-row .clip-duration input {
+  width: 60px;
+  padding: 5px 7px;
+  font-size: 0.8rem;
+  text-align: right;
+}
+.clip-row .clip-duration span {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.clip-row .clip-delete {
+  background: transparent;
+  color: var(--text-dim);
+  padding: 4px;
+  font-size: 0.9rem;
+}
+.clip-row .clip-delete:hover { color: var(--accent); }
+
+.clip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.clip-end-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.clip-end-row select {
+  padding: 5px 7px;
+  font-size: 0.8rem;
+}
+
+/* Landscape: side by side */
+@media (orientation: landscape), (min-width: 900px) {
+  .editor-layout { flex-direction: row; }
+  .editor-preview { flex: 0 0 50%; min-height: unset; }
+  .editor-clips-panel { flex: 1; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Room 3: Effect Properties                                           */
+/* ------------------------------------------------------------------ */
+.props-form {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 12px 16px;
+  align-items: center;
+  max-width: 500px;
+}
+.props-form label { text-align: right; }
+.props-form .full-width { grid-column: 1 / -1; }
+
+.effect-mini-preview {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #000;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.slider-row .val { font-size: 0.75rem; color: var(--text-dim); min-width: 30px; text-align: right; }
+
+/* ------------------------------------------------------------------ */
+/* Color picker popup                                                  */
+/* ------------------------------------------------------------------ */
+.color-popup-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 100;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px;
+}
+.color-popup-backdrop.open { display: flex; align-items: center; justify-content: center; }
+
+.color-popup {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  width: min(360px, 90vw);
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: auto;
+  flex-shrink: 0;
+}
+
+/* Landscape phone: horizontal layout, smaller wheel */
+@media (max-height: 500px) {
+  .color-popup-backdrop.open { align-items: flex-start; }
+  .color-popup {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: min(640px, 95vw);
+    padding: 12px;
+    gap: 10px;
+  }
+  .color-popup .popup-header { width: 100%; }
+  .color-popup .color-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+  }
+  .color-popup .color-right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .color-wheel-wrap { width: 140px; height: 140px; }
+  .color-wheel-wrap canvas { width: 140px; height: 140px; }
+  .color-popup .popup-apply { width: 100%; }
+}
+.color-popup .popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.color-popup .popup-header h3 { font-size: 0.95rem; }
+.color-popup .popup-close {
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  padding: 4px;
+}
+.color-popup .popup-close:hover { color: var(--text); }
+
+.color-wheel-wrap {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  margin: 0 auto;
+}
+.color-wheel-wrap canvas { border-radius: 50%; cursor: crosshair; }
+.color-wheel-cursor {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 3px rgba(0,0,0,0.5);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  top: 50%;
+  left: 50%;
+}
+
+.brightness-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.color-swatch {
+  width: 100%;
+  height: 36px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.color-inputs {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 6px 8px;
+  align-items: center;
+  font-size: 0.75rem;
+}
+.color-inputs label { color: var(--text-dim); text-align: right; }
+.color-inputs input {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+.color-inputs .mode-toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+.color-inputs .mode-toggle button {
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: var(--bg-body);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.color-inputs .mode-toggle button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Trigger filter bar */
+.trigger-filter-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+}
+.trigger-filter-bar.visible { display: flex; }
+.trigger-filter-bar .filter-label { color: var(--text-dim); }
+.trigger-filter-bar .filter-name { color: var(--accent); font-weight: 600; flex: 1; }
+.trigger-filter-bar .filter-clear {
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1rem;
+  padding: 2px 6px;
+}
+.trigger-filter-bar .filter-clear:hover { color: var(--text); }
+
+/* ------------------------------------------------------------------ */
+/* Room 4: Schedule / Triggers                                         */
+/* ------------------------------------------------------------------ */
+.triggers-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.trigger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+}
+
+.trigger-card {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: visible;
+}
+.trigger-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.trigger-header .trigger-name {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 80px;
+}
+.trigger-header .trigger-delete {
+  background: transparent;
+  color: var(--text-dim);
+  padding: 4px;
+  font-size: 0.9rem;
+}
+.trigger-header .trigger-delete:hover { color: var(--accent); }
+
+.trigger-detail {
+  font-size: 0.8rem;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.trigger-detail .field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.trigger-detail .field-row label {
+  min-width: 80px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+.trigger-detail input {
+  width: 60px;
+  padding: 5px 7px;
+  font-size: 0.8rem;
+}
+.trigger-detail select {
+  padding: 5px 7px;
+  font-size: 0.8rem;
+}
+.trigger-detail input[type="time"] { width: 120px; }
+.trigger-detail input[type="date"] { width: 150px; }
+.trigger-detail input[type="text"] { width: auto; flex: 1; min-width: 120px; }
+
+.day-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.day-chip {
+  width: 30px;
+  height: 26px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  font-size: 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.day-chip.on { background: #4a3a28; border-color: var(--accent); color: var(--accent); }
+
+.addr-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+.addr-group input { width: 40px; text-align: center; }
+.addr-group span { color: var(--text-dim); }
+
+.trigger-add-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Room 5 & 6: Placeholder                                             */
+/* ------------------------------------------------------------------ */
+.placeholder-room {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--text-dim);
+}
+.placeholder-room .icon { font-size: 3rem; }
+.placeholder-room h2 { font-size: 1.1rem; color: var(--text); }
+.placeholder-room p { font-size: 0.8rem; text-align: center; max-width: 300px; }
+</style>
+</head>
+
+<body>
+
+<!-- ================================================================ -->
+<!-- Top header (laptop)                                               -->
+<!-- ================================================================ -->
+<header class="app-header">
+  <h1>LED Controller</h1>
+  <nav class="tabs tabs--top" id="tabs-top"></nav>
+</header>
+
+<!-- ================================================================ -->
+<!-- Rooms                                                             -->
+<!-- ================================================================ -->
+<div class="room-container">
+
+  <!-- Room 1: Select Animation ------------------------------------ -->
+  <div class="room active" id="room-select">
+
+    <!-- Mobile swipe view -->
+    <div class="anim-swipe">
+      <div class="anim-slide">
+        <div class="anim-preview" style="background:linear-gradient(135deg,#e94560,#0f3460)"></div>
+        <div class="anim-overlay">
+          <div class="anim-info"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>
+      <div class="anim-slide">
+        <div class="anim-preview" style="background:linear-gradient(135deg,#6ee7b7,#0f3460)"></div>
+        <div class="anim-overlay">
+          <div class="anim-info"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>
+      <div class="anim-slide">
+        <div class="anim-preview" style="background:linear-gradient(135deg,#c084fc,#1a1a2e)"></div>
+        <div class="anim-overlay">
+          <div class="anim-info"><h3>Cozy Warm</h3><p>Warm white fade</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>
+      <div class="anim-slide">
+        <div class="anim-preview" style="background:linear-gradient(135deg,#fbbf24,#e94560)"></div>
+        <div class="anim-overlay">
+          <div class="anim-info"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>
+      <div class="anim-slide">
+        <div class="anim-preview" style="background:linear-gradient(135deg,#38bdf8,#1e3a5f)"></div>
+        <div class="anim-overlay">
+          <div class="anim-info"><h3>Ocean Breeze</h3><p>Gentle blue undulation</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>
+      <div class="anim-slide">
+        <div class="anim-preview" style="background:linear-gradient(135deg,#f472b6,#7c3aed)"></div>
+        <div class="anim-overlay">
+          <div class="anim-info"><h3>Party Strobe</h3><p>High-energy color flash</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Desktop grid view -->
+    <div class="anim-grid">
+      <div class="card anim-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#e94560,#0f3460)">Preview</div>
+        <div class="meta"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
+        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
+      </div>
+      <div class="card anim-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#6ee7b7,#0f3460)">Preview</div>
+        <div class="meta"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
+        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
+      </div>
+      <div class="card anim-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#c084fc,#1a1a2e)">Preview</div>
+        <div class="meta"><h3>Cozy Warm</h3><p>Warm white fade</p></div>
+        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
+      </div>
+      <div class="card anim-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#fbbf24,#e94560)">Preview</div>
+        <div class="meta"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
+        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
+      </div>
+      <div class="card anim-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#38bdf8,#1e3a5f)">Preview</div>
+        <div class="meta"><h3>Ocean Breeze</h3><p>Gentle blue undulation</p></div>
+        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
+      </div>
+      <div class="card anim-card">
+        <div class="thumb" style="background:linear-gradient(135deg,#f472b6,#7c3aed)">Preview</div>
+        <div class="meta"><h3>Party Strobe</h3><p>High-energy color flash</p></div>
+        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
+      </div>
+    </div>
+
+    <!-- Detail view (desktop: replaces grid on card click) -->
+    <div class="anim-detail" id="anim-detail">
+      <div class="detail-preview" id="detail-preview" style="background:linear-gradient(135deg,#e94560,#0f3460)"></div>
+      <div class="detail-overlay-top">
+        <div class="detail-toolbar">
+          <button class="btn btn--sm" id="detail-back">&larr; Back</button>
+          <span class="detail-title" id="detail-title">Rainbow Wave</span>
+          <span class="detail-desc" id="detail-desc">Smooth rainbow cycling</span>
+        </div>
+      </div>
+      <div class="detail-overlay-bottom">
+        <div class="detail-actions">
+          <button class="btn act-edit" id="detail-act-edit">Edit Animation</button>
+          <button class="btn act-color" id="detail-act-color">Set Color</button>
+          <button class="btn act-triggers" id="detail-act-triggers">Configure Triggers</button>
+        </div>
+        <div class="detail-nav">
+          <button class="btn btn--sm" id="detail-prev">&larr; Prev</button>
+          <button class="btn btn--sm" id="detail-next">Next &rarr;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Room 2: Animation Editor ------------------------------------ -->
+  <div class="room" id="room-editor">
+    <div class="context-bar">
+      <span class="context-label">Editing:</span>
+      <span class="context-name" id="editor-anim-name">Rainbow Wave</span>
+      <button class="btn btn--sm" id="editor-back-select">&larr; Select</button>
+    </div>
+    <div class="editor-layout">
+      <div class="editor-preview">
+        LED Preview
+        <div class="live-badge">
+          <input type="checkbox" class="toggle" id="live-toggle">
+          <label for="live-toggle">Live</label>
+        </div>
+        <div class="editor-transport">
+          <div class="transport-scrub" id="transport-scrub">
+            <div class="scrub-segments" id="scrub-segments"></div>
+            <div class="scrub-fill" id="scrub-fill">
+              <div class="scrub-handle"></div>
+            </div>
+          </div>
+          <div class="transport-controls">
+            <button class="transport-btn" id="transport-prev" title="Previous clip">&#x23EE;</button>
+            <button class="transport-btn" id="transport-play" title="Play/Pause">&#x25B6;</button>
+            <button class="transport-btn" id="transport-next" title="Next clip">&#x23ED;</button>
+            <span class="transport-time" id="transport-time">00:00.0 / 00:50.0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="editor-clips-panel">
+        <div class="editor-clips-toolbar">
+          <button class="btn btn--sm btn--accent" id="add-clip">+ Add Clip</button>
+          <div class="clip-end-row">
+            <label>End:</label>
+            <select>
+              <option>Loop all</option>
+              <option>Stop at end</option>
+              <option>Fade out</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="clip-list" id="clip-list">
+          <div class="card clip-row selected">
+            <span class="clip-index">1</span>
+            <div class="clip-effect">
+              <select>
+                <option selected>Rainbow Wave</option>
+                <option>Sparkle</option>
+                <option>Solid Color</option>
+                <option>Fire</option>
+                <option>Breathing</option>
+                <option>Ocean Breeze</option>
+              </select>
+            </div>
+            <div class="clip-duration">
+              <input type="number" value="12.0" min="0.1" step="0.1">
+              <span>s</span>
+            </div>
+            <button class="clip-delete">&#x2715;</button>
+          </div>
+          <div class="card clip-row">
+            <span class="clip-index">2</span>
+            <div class="clip-effect">
+              <select>
+                <option>Rainbow Wave</option>
+                <option>Sparkle</option>
+                <option selected>Solid Color</option>
+                <option>Fire</option>
+                <option>Breathing</option>
+                <option>Ocean Breeze</option>
+              </select>
+            </div>
+            <div class="clip-duration">
+              <input type="number" value="8.0" min="0.1" step="0.1">
+              <span>s</span>
+            </div>
+            <button class="clip-delete">&#x2715;</button>
+          </div>
+          <div class="card clip-row">
+            <span class="clip-index">3</span>
+            <div class="clip-effect">
+              <select>
+                <option>Rainbow Wave</option>
+                <option selected>Sparkle</option>
+                <option>Solid Color</option>
+                <option>Fire</option>
+                <option>Breathing</option>
+                <option>Ocean Breeze</option>
+              </select>
+            </div>
+            <div class="clip-duration">
+              <input type="number" value="5.0" min="0.1" step="0.1">
+              <span>s</span>
+            </div>
+            <button class="clip-delete">&#x2715;</button>
+          </div>
+          <div class="card clip-row">
+            <span class="clip-index">4</span>
+            <div class="clip-effect">
+              <select>
+                <option>Rainbow Wave</option>
+                <option>Sparkle</option>
+                <option>Solid Color</option>
+                <option selected>Fire</option>
+                <option>Breathing</option>
+                <option>Ocean Breeze</option>
+              </select>
+            </div>
+            <div class="clip-duration">
+              <input type="number" value="10.0" min="0.1" step="0.1">
+              <span>s</span>
+            </div>
+            <button class="clip-delete">&#x2715;</button>
+          </div>
+          <div class="card clip-row">
+            <span class="clip-index">5</span>
+            <div class="clip-effect">
+              <select>
+                <option>Rainbow Wave</option>
+                <option>Sparkle</option>
+                <option>Solid Color</option>
+                <option>Fire</option>
+                <option>Breathing</option>
+                <option selected>Ocean Breeze</option>
+              </select>
+            </div>
+            <div class="clip-duration">
+              <input type="number" value="15.0" min="0.1" step="0.1">
+              <span>s</span>
+            </div>
+            <button class="clip-delete">&#x2715;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Room 3: Effect Properties ----------------------------------- -->
+  <div class="room" id="room-effects">
+    <div class="context-bar">
+      <span class="context-label">Editing:</span>
+      <span class="context-name" id="effects-anim-name">Rainbow Wave</span>
+      <span class="context-sep">&#x25B8;</span>
+      <span class="context-name" id="effects-effect-name">Rainbow Wave</span>
+    </div>
+    <div class="props-form">
+      <div class="full-width effect-mini-preview">Effect Preview</div>
+
+      <label>Effect</label>
+      <select id="effect-select">
+        <option>Rainbow Wave</option>
+        <option>Sparkle</option>
+        <option>Solid Color</option>
+        <option>Fire</option>
+        <option>Breathing</option>
+        <option>Custom Video</option>
+      </select>
+
+      <label>Speed</label>
+      <div class="slider-row">
+        <input type="range" min="1" max="100" value="50">
+        <span class="val">50%</span>
+      </div>
+
+      <label>Intensity</label>
+      <div class="slider-row">
+        <input type="range" min="0" max="100" value="80">
+        <span class="val">80%</span>
+      </div>
+
+      <label>Color 1</label>
+      <input type="color" value="#e94560" style="width:60px;height:32px;padding:2px;border:1px solid var(--border)">
+
+      <label>Color 2</label>
+      <input type="color" value="#0f3460" style="width:60px;height:32px;padding:2px;border:1px solid var(--border)">
+
+      <label>Direction</label>
+      <select>
+        <option>Forward</option>
+        <option>Reverse</option>
+        <option>Bounce</option>
+        <option>Random</option>
+      </select>
+
+      <label>Blend</label>
+      <select>
+        <option>Cross-fade</option>
+        <option>Cut</option>
+        <option>Dissolve</option>
+      </select>
+
+      <div class="full-width" style="margin-top:8px">
+        <button class="btn btn--accent">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Room 4: Schedule / Triggers --------------------------------- -->
+  <div class="room" id="room-triggers">
+    <div class="context-bar">
+      <span class="context-label">Editing:</span>
+      <span class="context-name" id="triggers-anim-name">Rainbow Wave</span>
+      <span class="context-sep">&#x25B8;</span>
+      <span class="context-name" id="triggers-effect-name">Rainbow Wave</span>
+      <button class="btn btn--sm" id="triggers-back-editor">&larr; Editor</button>
+    </div>
+    <div class="triggers-layout">
+
+      <div style="display:flex;flex-direction:column;gap:12px;flex:1;min-width:0">
+        <div class="trigger-filter-bar" id="trigger-filter">
+          <span class="filter-label">Showing triggers for:</span>
+          <span class="filter-name" id="trigger-filter-name"></span>
+          <button class="filter-clear" id="trigger-filter-clear">&#x2715; Show all</button>
+        </div>
+        <div class="section-title">Triggers</div>
+        <div class="trigger-add-row">
+          <button class="btn btn--sm btn--accent" id="add-datetime">+ Date/Time</button>
+          <button class="btn btn--sm" id="add-artnet">+ ArtNet</button>
+          <button class="btn btn--sm" id="add-api">+ API</button>
+        </div>
+
+        <div class="trigger-list" id="trigger-list">
+          <!-- Date/Time trigger — Weekly (weekdays) -->
+          <div class="card trigger-card" data-trigger-anim="Rainbow Wave" data-trigger-type="datetime">
+            <div class="trigger-header">
+              <span class="badge badge--time">Date/Time</span>
+              <span class="trigger-anim-badge">Rainbow Wave</span>
+              <span class="trigger-name">Evening Schedule</span>
+              <input type="checkbox" class="toggle" checked>
+              <button class="trigger-delete">&#x2715;</button>
+            </div>
+            <div class="trigger-detail">
+              <div class="field-row">
+                <label>Recurrence</label>
+                <select class="recurrence-select">
+                  <option value="daily">Every Day</option>
+                  <option value="weekly" selected>Every Week</option>
+                  <option value="monthly">Every Month</option>
+                  <option value="yearly">Every Year</option>
+                </select>
+              </div>
+              <div class="field-row recurrence-field weekly-field">
+                <label>Days</label>
+                <div class="day-chips">
+                  <button class="day-chip on">Mo</button>
+                  <button class="day-chip on">Tu</button>
+                  <button class="day-chip on">We</button>
+                  <button class="day-chip on">Th</button>
+                  <button class="day-chip on">Fr</button>
+                  <button class="day-chip">Sa</button>
+                  <button class="day-chip">Su</button>
+                </div>
+              </div>
+              <div class="field-row recurrence-field monthly-field" style="display:none">
+                <label>Day of month</label>
+                <input type="number" value="1" min="1" max="31" style="width:60px">
+              </div>
+              <div class="field-row recurrence-field yearly-field" style="display:none">
+                <label>Month</label>
+                <select class="yearly-month">
+                  <option value="1">January</option><option value="2">February</option>
+                  <option value="3">March</option><option value="4">April</option>
+                  <option value="5">May</option><option value="6">June</option>
+                  <option value="7">July</option><option value="8">August</option>
+                  <option value="9">September</option><option value="10">October</option>
+                  <option value="11">November</option><option value="12" selected>December</option>
+                </select>
+              </div>
+              <div class="field-row recurrence-field yearly-field" style="display:none">
+                <label>Day</label>
+                <input type="number" value="25" min="1" max="31" style="width:60px">
+              </div>
+              <div class="field-row">
+                <label>Start time</label>
+                <input type="time" value="18:00">
+              </div>
+              <div class="field-row">
+                <label>End time</label>
+                <input type="time" value="23:30">
+              </div>
+            </div>
+          </div>
+
+          <!-- Date/Time trigger — Weekly (weekends) -->
+          <div class="card trigger-card" data-trigger-anim="Party Strobe" data-trigger-type="datetime">
+            <div class="trigger-header">
+              <span class="badge badge--time">Date/Time</span>
+              <span class="trigger-anim-badge">Party Strobe</span>
+              <span class="trigger-name">Weekend Party</span>
+              <input type="checkbox" class="toggle" checked>
+              <button class="trigger-delete">&#x2715;</button>
+            </div>
+            <div class="trigger-detail">
+              <div class="field-row">
+                <label>Recurrence</label>
+                <select class="recurrence-select">
+                  <option value="daily">Every Day</option>
+                  <option value="weekly" selected>Every Week</option>
+                  <option value="monthly">Every Month</option>
+                  <option value="yearly">Every Year</option>
+                </select>
+              </div>
+              <div class="field-row recurrence-field weekly-field">
+                <label>Days</label>
+                <div class="day-chips">
+                  <button class="day-chip">Mo</button>
+                  <button class="day-chip">Tu</button>
+                  <button class="day-chip">We</button>
+                  <button class="day-chip">Th</button>
+                  <button class="day-chip">Fr</button>
+                  <button class="day-chip on">Sa</button>
+                  <button class="day-chip on">Su</button>
+                </div>
+              </div>
+              <div class="field-row recurrence-field monthly-field" style="display:none">
+                <label>Day of month</label>
+                <input type="number" value="1" min="1" max="31" style="width:60px">
+              </div>
+              <div class="field-row recurrence-field yearly-field" style="display:none">
+                <label>Month</label>
+                <select class="yearly-month">
+                  <option value="1" selected>January</option><option value="2">February</option>
+                  <option value="3">March</option><option value="4">April</option>
+                  <option value="5">May</option><option value="6">June</option>
+                  <option value="7">July</option><option value="8">August</option>
+                  <option value="9">September</option><option value="10">October</option>
+                  <option value="11">November</option><option value="12">December</option>
+                </select>
+              </div>
+              <div class="field-row recurrence-field yearly-field" style="display:none">
+                <label>Day</label>
+                <input type="number" value="1" min="1" max="31" style="width:60px">
+              </div>
+              <div class="field-row">
+                <label>Start time</label>
+                <input type="time" value="20:00">
+              </div>
+              <div class="field-row">
+                <label>End time</label>
+                <input type="time" value="02:00">
+              </div>
+            </div>
+          </div>
+
+          <!-- ArtNet trigger -->
+          <div class="card trigger-card" data-trigger-anim="Fire Flicker" data-trigger-type="artnet">
+            <div class="trigger-header">
+              <span class="badge badge--artnet">ArtNet In</span>
+              <span class="trigger-anim-badge">Fire Flicker</span>
+              <span class="trigger-name">DMX Trigger Ch 1</span>
+              <input type="checkbox" class="toggle" checked>
+              <button class="trigger-delete">&#x2715;</button>
+            </div>
+            <div class="trigger-detail">
+              <div class="field-row">
+                <label>Address</label>
+                <div class="addr-group">
+                  <input type="number" value="0" min="0" max="127">
+                  <span>:</span>
+                  <input type="number" value="0" min="0" max="15">
+                  <span>:</span>
+                  <input type="number" value="0" min="0" max="15">
+                  <span>:</span>
+                  <input type="number" value="1" min="1" max="512">
+                </div>
+              </div>
+              <div class="field-row">
+                <label>Threshold</label>
+                <input type="number" value="128" min="0" max="255" style="width:70px">
+                <span style="font-size:0.7rem;color:var(--text-dim)">(0–255)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- API trigger -->
+          <div class="card trigger-card" data-trigger-anim="Ocean Breeze" data-trigger-type="api">
+            <div class="trigger-header">
+              <span class="badge badge--api">API</span>
+              <span class="trigger-anim-badge">Ocean Breeze</span>
+              <span class="trigger-name">Home Assistant</span>
+              <input type="checkbox" class="toggle">
+              <button class="trigger-delete">&#x2715;</button>
+            </div>
+            <div class="trigger-detail">
+              <div class="field-row">
+                <label>Endpoint</label>
+                <input type="text" value="/api/trigger/homeassist" readonly style="font-family:monospace">
+              </div>
+              <div class="field-row">
+                <label>State</label>
+                <span style="color:var(--accent);font-weight:600">false</span>
+                <span style="font-size:0.7rem;color:var(--text-dim)">POST true/false</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Room 5: Hardware Setup -------------------------------------- -->
+  <div class="room" id="room-hardware">
+    <div class="placeholder-room">
+      <div class="icon">&#x2699;</div>
+      <h2>Hardware Setup</h2>
+      <p>Configure controllers, LED strips, port assignments, and network settings.</p>
+    </div>
+  </div>
+
+  <!-- Room 6: Mapping --------------------------------------------- -->
+  <div class="room" id="room-mapping">
+    <div class="placeholder-room">
+      <div class="icon">&#x25A6;</div>
+      <h2>Mapping</h2>
+      <p>Map LED pixel positions to physical layout, assign zones, and configure pixel order.</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- Color picker popup -->
+<div class="color-popup-backdrop" id="color-popup">
+  <div class="color-popup">
+    <div class="popup-header">
+      <h3 id="color-popup-title">Color</h3>
+      <button class="popup-close" id="color-popup-close">&#x2715;</button>
+    </div>
+    <div class="color-left">
+      <div class="color-wheel-wrap">
+        <canvas id="color-wheel" width="200" height="200"></canvas>
+        <div class="color-wheel-cursor" id="color-cursor"></div>
+      </div>
+      <label style="font-size:0.7rem">Brightness</label>
+      <input type="range" class="brightness-slider" id="color-brightness" min="0" max="100" value="100">
+    </div>
+    <div class="color-right">
+      <div class="color-swatch" id="color-swatch" style="background:#ff0000"></div>
+      <div class="color-inputs">
+        <div class="mode-toggle">
+          <button class="active" id="mode-8bit">8-bit</button>
+          <button id="mode-float">Float</button>
+        </div>
+        <label>R</label><input type="number" id="color-r" min="0" max="255" value="255">
+        <label>G</label><input type="number" id="color-g" min="0" max="255" value="0">
+        <label>B</label><input type="number" id="color-b" min="0" max="255" value="0">
+      </div>
+    </div>
+    <button class="btn btn--accent popup-apply" style="width:100%" id="color-apply">Apply</button>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- Bottom tab bar (mobile / RPi)                                     -->
+<!-- ================================================================ -->
+<nav class="tabs tabs--bottom" id="tabs-bottom"></nav>
+
+<!-- ================================================================ -->
+<!-- Script                                                            -->
+<!-- ================================================================ -->
+<script>
+const rooms = [
+  { id: "select",   icon: "\u25B6", label: "Select"   },
+  { id: "editor",   icon: "\u2702", label: "Editor"   },
+  { id: "effects",  icon: "\u2726", label: "Effects"  },
+  { id: "triggers", icon: "\u29D6", label: "Triggers" },
+  { id: "hardware", icon: "\u2699", label: "Hardware" },
+  { id: "mapping",  icon: "\u25A6", label: "Mapping"  },
+];
+
+function buildTabs(container) {
+  for (const r of rooms) {
+    const btn = document.createElement("button");
+    btn.dataset.room = r.id;
+    btn.innerHTML = `<span class="icon">${r.icon}</span>${r.label}`;
+    if (r.id === "select") btn.classList.add("active");
+    container.appendChild(btn);
+  }
+}
+
+buildTabs(document.getElementById("tabs-top"));
+buildTabs(document.getElementById("tabs-bottom"));
+
+function switchRoom(id) {
+  document.querySelectorAll(".room").forEach(r => r.classList.remove("active"));
+  document.getElementById("room-" + id).classList.add("active");
+  document.querySelectorAll("[data-room]").forEach(b => {
+    b.classList.toggle("active", b.dataset.room === id);
+  });
+}
+
+document.querySelectorAll("[data-room]").forEach(btn => {
+  btn.addEventListener("click", () => switchRoom(btn.dataset.room));
+});
+
+// ================================================================== //
+// Clip list — selection, add, delete, renumber
+// ================================================================== //
+const clipList = document.getElementById("clip-list");
+
+function renumberClips() {
+  clipList.querySelectorAll(".clip-row").forEach((row, i) => {
+    row.querySelector(".clip-index").textContent = i + 1;
+  });
+}
+
+// Select clip (delegated)
+clipList.addEventListener("click", (e) => {
+  const row = e.target.closest(".clip-row");
+  if (!row) return;
+  // Delete button
+  if (e.target.closest(".clip-delete")) {
+    row.remove();
+    renumberClips();
+    return;
+  }
+  // Don't change selection when interacting with inputs/selects
+  if (e.target.closest("select, input")) return;
+  clipList.querySelectorAll(".clip-row").forEach(r => r.classList.remove("selected"));
+  row.classList.add("selected");
+});
+
+// Add clip
+document.getElementById("add-clip").addEventListener("click", () => {
+  const count = clipList.querySelectorAll(".clip-row").length;
+  const html = `
+    <div class="card clip-row">
+      <span class="clip-index">${count + 1}</span>
+      <div class="clip-effect">
+        <select>
+          <option>Rainbow Wave</option>
+          <option>Sparkle</option>
+          <option selected>Solid Color</option>
+          <option>Fire</option>
+          <option>Breathing</option>
+          <option>Ocean Breeze</option>
+        </select>
+      </div>
+      <div class="clip-duration">
+        <input type="number" value="5.0" min="0.1" step="0.1">
+        <span>s</span>
+      </div>
+      <button class="clip-delete">&#x2715;</button>
+    </div>`;
+  clipList.insertAdjacentHTML("beforeend", html);
+  clipList.lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  buildScrubSegments();
+});
+
+// Also rebuild segments on delete
+const origClipClick = clipList.onclick;
+clipList.addEventListener("click", (e) => {
+  if (e.target.closest(".clip-delete")) {
+    requestAnimationFrame(buildScrubSegments);
+  }
+});
+
+// ================================================================== //
+// Transport bar — play/pause, scrub, clip highlighting
+// ================================================================== //
+const scrubBar = document.getElementById("transport-scrub");
+const scrubFill = document.getElementById("scrub-fill");
+const scrubSegments = document.getElementById("scrub-segments");
+const transportTime = document.getElementById("transport-time");
+const transportPlay = document.getElementById("transport-play");
+const transportPrev = document.getElementById("transport-prev");
+const transportNext = document.getElementById("transport-next");
+
+let isPlaying = false;
+let playTime = 0;
+let playRAF = null;
+let lastPlayTS = 0;
+
+// Get clip durations from the list
+function getClipDurations() {
+  const rows = clipList.querySelectorAll(".clip-row");
+  return Array.from(rows).map(r => {
+    const inp = r.querySelector(".clip-duration input");
+    return parseFloat(inp.value) || 1;
+  });
+}
+
+function getTotalDuration() {
+  return getClipDurations().reduce((a, b) => a + b, 0);
+}
+
+function formatTime(t) {
+  const m = Math.floor(t / 60);
+  const s = (t % 60).toFixed(1);
+  return String(m).padStart(2, "0") + ":" + s.padStart(4, "0");
+}
+
+// Build colored segments in scrub bar
+const segColors = ["#e94560","#6ee7b7","#c084fc","#f97316","#38bdf8","#f472b6","#fbbf24","#34d399"];
+function buildScrubSegments() {
+  const durs = getClipDurations();
+  const total = durs.reduce((a, b) => a + b, 0) || 1;
+  scrubSegments.innerHTML = "";
+  durs.forEach((d, i) => {
+    const seg = document.createElement("div");
+    seg.className = "scrub-seg";
+    seg.style.flex = d / total;
+    seg.style.background = segColors[i % segColors.length];
+    seg.style.opacity = "0.5";
+    scrubSegments.appendChild(seg);
+  });
+  updateTransport();
+}
+
+function updateTransport() {
+  const total = getTotalDuration() || 1;
+  const pct = Math.min(playTime / total, 1) * 100;
+  scrubFill.style.width = pct + "%";
+  transportTime.textContent = formatTime(playTime) + " / " + formatTime(total);
+
+  // Highlight active clip row
+  const durs = getClipDurations();
+  const rows = clipList.querySelectorAll(".clip-row");
+  let acc = 0;
+  let activeIdx = -1;
+  for (let i = 0; i < durs.length; i++) {
+    if (playTime >= acc && playTime < acc + durs[i]) { activeIdx = i; break; }
+    acc += durs[i];
+  }
+  if (activeIdx === -1 && durs.length) activeIdx = durs.length - 1;
+  rows.forEach((r, i) => r.classList.toggle("playing", i === activeIdx));
+
+  // Highlight active segment
+  const segs = scrubSegments.querySelectorAll(".scrub-seg");
+  segs.forEach((s, i) => s.style.opacity = i === activeIdx ? "1" : "0.4");
+}
+
+// Play/pause
+function playLoop(ts) {
+  if (!isPlaying) return;
+  if (lastPlayTS) {
+    const dt = (ts - lastPlayTS) / 1000;
+    playTime += dt;
+    const total = getTotalDuration();
+    if (playTime >= total) playTime = 0;
+  }
+  lastPlayTS = ts;
+  updateTransport();
+  playRAF = requestAnimationFrame(playLoop);
+}
+
+transportPlay.addEventListener("click", () => {
+  isPlaying = !isPlaying;
+  transportPlay.textContent = isPlaying ? "\u23F8" : "\u25B6";
+  if (isPlaying) {
+    lastPlayTS = 0;
+    playRAF = requestAnimationFrame(playLoop);
+  } else {
+    cancelAnimationFrame(playRAF);
+  }
+});
+
+// Prev / Next clip
+transportPrev.addEventListener("click", () => {
+  const durs = getClipDurations();
+  let acc = 0;
+  for (let i = 0; i < durs.length; i++) {
+    if (playTime < acc + durs[i] + 0.01) {
+      playTime = i > 0 ? acc - durs[i - 1] : 0;
+      if (playTime < 0) playTime = 0;
+      break;
+    }
+    acc += durs[i];
+  }
+  updateTransport();
+});
+
+transportNext.addEventListener("click", () => {
+  const durs = getClipDurations();
+  let acc = 0;
+  for (let i = 0; i < durs.length; i++) {
+    acc += durs[i];
+    if (playTime < acc - 0.01) { playTime = acc; break; }
+  }
+  const total = getTotalDuration();
+  if (playTime >= total) playTime = 0;
+  updateTransport();
+});
+
+// Scrub click/drag
+let scrubbing = false;
+function scrubFromEvent(e) {
+  const rect = scrubBar.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  playTime = pct * getTotalDuration();
+  updateTransport();
+}
+scrubBar.addEventListener("pointerdown", (e) => {
+  scrubbing = true;
+  scrubBar.setPointerCapture(e.pointerId);
+  scrubFromEvent(e);
+});
+scrubBar.addEventListener("pointermove", (e) => { if (scrubbing) scrubFromEvent(e); });
+scrubBar.addEventListener("pointerup", () => { scrubbing = false; });
+
+// Also update when duration inputs change
+clipList.addEventListener("input", (e) => {
+  if (e.target.closest(".clip-duration input")) {
+    buildScrubSegments();
+  }
+});
+
+// Init segments
+buildScrubSegments();
+
+// Animation grid → detail view (desktop)
+const animGrid = document.querySelector(".anim-grid");
+const animDetail = document.getElementById("anim-detail");
+const detailTitle = document.getElementById("detail-title");
+const detailDesc = document.getElementById("detail-desc");
+const detailPreview = document.getElementById("detail-preview");
+const animCards = Array.from(document.querySelectorAll(".anim-card"));
+let currentCardIdx = 0;
+
+function showDetail(idx) {
+  currentCardIdx = idx;
+  const card = animCards[idx];
+  detailTitle.textContent = card.querySelector("h3").textContent;
+  detailDesc.textContent = card.querySelector("p").textContent;
+  detailPreview.style.background = card.querySelector(".thumb").style.background;
+  animGrid.classList.add("hidden");
+  animDetail.classList.add("open");
+}
+
+function hideDetail() {
+  animDetail.classList.remove("open");
+  animGrid.classList.remove("hidden");
+}
+
+animCards.forEach((card, i) => {
+  card.addEventListener("click", (e) => {
+    // Don't open detail if clicking an action button
+    if (e.target.closest(".act-edit, .act-color, .act-triggers")) return;
+    showDetail(i);
+  });
+});
+
+document.getElementById("detail-back").addEventListener("click", hideDetail);
+document.getElementById("detail-prev").addEventListener("click", () => {
+  showDetail((currentCardIdx - 1 + animCards.length) % animCards.length);
+});
+document.getElementById("detail-next").addEventListener("click", () => {
+  showDetail((currentCardIdx + 1) % animCards.length);
+});
+
+// Slider value display
+document.querySelectorAll(".slider-row input[type='range']").forEach(slider => {
+  const val = slider.parentElement.querySelector(".val");
+  if (val) slider.addEventListener("input", () => { val.textContent = slider.value + "%"; });
+});
+
+// ================================================================== //
+// Selected animation state
+// ================================================================== //
+let selectedAnimName = "Rainbow Wave";
+let selectedEffectName = "Rainbow Wave";
+
+const editorAnimName = document.getElementById("editor-anim-name");
+const effectsAnimName = document.getElementById("effects-anim-name");
+const effectsEffectName = document.getElementById("effects-effect-name");
+const triggersAnimName = document.getElementById("triggers-anim-name");
+const triggersEffectName = document.getElementById("triggers-effect-name");
+const effectSelect = document.getElementById("effect-select");
+
+function setSelectedAnim(name) {
+  selectedAnimName = name;
+  editorAnimName.textContent = name;
+  effectsAnimName.textContent = name;
+  triggersAnimName.textContent = name;
+}
+
+function setSelectedEffect(name) {
+  selectedEffectName = name;
+  effectsEffectName.textContent = name;
+  triggersEffectName.textContent = name;
+}
+
+// Effect select updates breadcrumb
+effectSelect.addEventListener("change", () => {
+  setSelectedEffect(effectSelect.value);
+});
+
+// ================================================================== //
+// Helper: get animation name from nearest context
+// ================================================================== //
+function getAnimName(el) {
+  const slide = el.closest(".anim-slide");
+  if (slide) return slide.querySelector("h3")?.textContent || "Animation";
+  const card = el.closest(".anim-card");
+  if (card) return card.querySelector("h3")?.textContent || "Animation";
+  return detailTitle.textContent || "Animation";
+}
+
+// ================================================================== //
+// Edit → set selected anim, open Editor room
+// ================================================================== //
+document.querySelectorAll(".act-edit").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setSelectedAnim(getAnimName(btn));
+    switchRoom("editor");
+  });
+});
+
+// Back buttons
+document.getElementById("editor-back-select").addEventListener("click", () => {
+  switchRoom("select");
+});
+document.getElementById("triggers-back-editor").addEventListener("click", () => {
+  switchRoom("editor");
+});
+
+// ================================================================== //
+// Triggers — filter, delete, add, recurrence
+// ================================================================== //
+const triggerFilter = document.getElementById("trigger-filter");
+const triggerFilterName = document.getElementById("trigger-filter-name");
+const triggerList = document.getElementById("trigger-list");
+let currentTriggerFilter = null;
+
+function applyTriggerFilter(name) {
+  currentTriggerFilter = name;
+  if (name) {
+    triggerFilterName.textContent = name;
+    triggerFilter.classList.add("visible");
+  } else {
+    triggerFilter.classList.remove("visible");
+  }
+  triggerList.querySelectorAll(".trigger-card").forEach(card => {
+    const anim = card.dataset.triggerAnim || "";
+    if (name) {
+      card.style.display = (anim === name) ? "" : "none";
+      const badge = card.querySelector(".trigger-anim-badge");
+      if (badge) badge.style.display = "none";
+    } else {
+      card.style.display = "";
+      const badge = card.querySelector(".trigger-anim-badge");
+      if (badge) badge.style.display = "";
+    }
+  });
+}
+
+function showTriggersFor(name) {
+  applyTriggerFilter(name);
+  switchRoom("triggers");
+}
+
+document.getElementById("trigger-filter-clear").addEventListener("click", () => {
+  applyTriggerFilter(null);
+});
+
+document.querySelectorAll(".act-triggers").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setSelectedAnim(getAnimName(btn));
+    showTriggersFor(getAnimName(btn));
+  });
+});
+
+// -- Recurrence toggle fields ----------------------------------------
+function initRecurrence(card) {
+  const sel = card.querySelector(".recurrence-select");
+  if (!sel) return;
+  function update() {
+    const val = sel.value;
+    card.querySelectorAll(".weekly-field").forEach(el => el.style.display = val === "weekly" ? "" : "none");
+    card.querySelectorAll(".monthly-field").forEach(el => el.style.display = val === "monthly" ? "" : "none");
+    card.querySelectorAll(".yearly-field").forEach(el => el.style.display = val === "yearly" ? "" : "none");
+  }
+  sel.addEventListener("change", update);
+}
+triggerList.querySelectorAll(".trigger-card").forEach(initRecurrence);
+
+// -- Day chip toggles (delegated) ------------------------------------
+triggerList.addEventListener("click", (e) => {
+  const chip = e.target.closest(".day-chip");
+  if (chip) chip.classList.toggle("on");
+});
+
+// -- Delete trigger --------------------------------------------------
+triggerList.addEventListener("click", (e) => {
+  const del = e.target.closest(".trigger-delete");
+  if (!del) return;
+  const card = del.closest(".trigger-card");
+  if (card) card.remove();
+});
+
+// -- Add trigger templates -------------------------------------------
+function makeAnimName() {
+  return currentTriggerFilter || selectedAnimName || "Animation";
+}
+
+function addDateTimeTrigger() {
+  const anim = makeAnimName();
+  const html = `
+    <div class="card trigger-card" data-trigger-anim="${anim}" data-trigger-type="datetime">
+      <div class="trigger-header">
+        <span class="badge badge--time">Date/Time</span>
+        <span class="trigger-anim-badge">${anim}</span>
+        <span class="trigger-name">New Schedule</span>
+        <input type="checkbox" class="toggle" checked>
+        <button class="trigger-delete">&#x2715;</button>
+      </div>
+      <div class="trigger-detail">
+        <div class="field-row">
+          <label>Recurrence</label>
+          <select class="recurrence-select">
+            <option value="daily" selected>Every Day</option>
+            <option value="weekly">Every Week</option>
+            <option value="monthly">Every Month</option>
+            <option value="yearly">Every Year</option>
+          </select>
+        </div>
+        <div class="field-row recurrence-field weekly-field" style="display:none">
+          <label>Days</label>
+          <div class="day-chips">
+            <button class="day-chip on">Mo</button>
+            <button class="day-chip on">Tu</button>
+            <button class="day-chip on">We</button>
+            <button class="day-chip on">Th</button>
+            <button class="day-chip on">Fr</button>
+            <button class="day-chip on">Sa</button>
+            <button class="day-chip on">Su</button>
+          </div>
+        </div>
+        <div class="field-row recurrence-field monthly-field" style="display:none">
+          <label>Day of month</label>
+          <input type="number" value="1" min="1" max="31" style="width:60px">
+        </div>
+        <div class="field-row recurrence-field yearly-field" style="display:none">
+          <label>Month</label>
+          <select class="yearly-month">
+            <option value="1" selected>January</option><option value="2">February</option>
+            <option value="3">March</option><option value="4">April</option>
+            <option value="5">May</option><option value="6">June</option>
+            <option value="7">July</option><option value="8">August</option>
+            <option value="9">September</option><option value="10">October</option>
+            <option value="11">November</option><option value="12">December</option>
+          </select>
+        </div>
+        <div class="field-row recurrence-field yearly-field" style="display:none">
+          <label>Day</label>
+          <input type="number" value="1" min="1" max="31" style="width:60px">
+        </div>
+        <div class="field-row">
+          <label>Start time</label>
+          <input type="time" value="18:00">
+        </div>
+        <div class="field-row">
+          <label>End time</label>
+          <input type="time" value="23:00">
+        </div>
+      </div>
+    </div>`;
+  triggerList.insertAdjacentHTML("beforeend", html);
+  const card = triggerList.lastElementChild;
+  initRecurrence(card);
+  applyTriggerFilter(currentTriggerFilter);
+  card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function addArtNetTrigger() {
+  const anim = makeAnimName();
+  const html = `
+    <div class="card trigger-card" data-trigger-anim="${anim}" data-trigger-type="artnet">
+      <div class="trigger-header">
+        <span class="badge badge--artnet">ArtNet In</span>
+        <span class="trigger-anim-badge">${anim}</span>
+        <span class="trigger-name">New ArtNet Trigger</span>
+        <input type="checkbox" class="toggle" checked>
+        <button class="trigger-delete">&#x2715;</button>
+      </div>
+      <div class="trigger-detail">
+        <div class="field-row">
+          <label>Address</label>
+          <div class="addr-group">
+            <input type="number" value="0" min="0" max="127">
+            <span>:</span>
+            <input type="number" value="0" min="0" max="15">
+            <span>:</span>
+            <input type="number" value="0" min="0" max="15">
+            <span>:</span>
+            <input type="number" value="1" min="1" max="512">
+          </div>
+        </div>
+        <div class="field-row">
+          <label>Threshold</label>
+          <input type="number" value="128" min="0" max="255" style="width:70px">
+          <span style="font-size:0.7rem;color:var(--text-dim)">(0–255)</span>
+        </div>
+      </div>
+    </div>`;
+  triggerList.insertAdjacentHTML("beforeend", html);
+  applyTriggerFilter(currentTriggerFilter);
+  triggerList.lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function addAPITrigger() {
+  const anim = makeAnimName();
+  const html = `
+    <div class="card trigger-card" data-trigger-anim="${anim}" data-trigger-type="api">
+      <div class="trigger-header">
+        <span class="badge badge--api">API</span>
+        <span class="trigger-anim-badge">${anim}</span>
+        <span class="trigger-name">New API Trigger</span>
+        <input type="checkbox" class="toggle">
+        <button class="trigger-delete">&#x2715;</button>
+      </div>
+      <div class="trigger-detail">
+        <div class="field-row">
+          <label>Endpoint</label>
+          <input type="text" value="/api/trigger/new" readonly style="font-family:monospace">
+        </div>
+        <div class="field-row">
+          <label>State</label>
+          <span style="color:var(--accent);font-weight:600">false</span>
+          <span style="font-size:0.7rem;color:var(--text-dim)">POST true/false</span>
+        </div>
+      </div>
+    </div>`;
+  triggerList.insertAdjacentHTML("beforeend", html);
+  applyTriggerFilter(currentTriggerFilter);
+  triggerList.lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.getElementById("add-datetime").addEventListener("click", addDateTimeTrigger);
+document.getElementById("add-artnet").addEventListener("click", addArtNetTrigger);
+document.getElementById("add-api").addEventListener("click", addAPITrigger);
+
+// ================================================================== //
+// Color popup — canvas HSV wheel + brightness + RGB inputs
+// ================================================================== //
+const colorPopup = document.getElementById("color-popup");
+const colorPopupTitle = document.getElementById("color-popup-title");
+const colorWheel = document.getElementById("color-wheel");
+const colorCursor = document.getElementById("color-cursor");
+const colorBrightness = document.getElementById("color-brightness");
+const colorSwatch = document.getElementById("color-swatch");
+const colorR = document.getElementById("color-r");
+const colorG = document.getElementById("color-g");
+const colorB = document.getElementById("color-b");
+const mode8bit = document.getElementById("mode-8bit");
+const modeFloat = document.getElementById("mode-float");
+
+let colorMode = "8bit"; // "8bit" or "float"
+let pickedH = 0, pickedS = 1, pickedV = 1;
+
+// Draw the color wheel
+const ctx = colorWheel.getContext("2d");
+const cx = 100, cy = 100, radius = 100;
+
+function drawWheel() {
+  const img = ctx.createImageData(200, 200);
+  for (let y = 0; y < 200; y++) {
+    for (let x = 0; x < 200; x++) {
+      const dx = x - cx, dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const i = (y * 200 + x) * 4;
+      if (dist <= radius) {
+        const angle = Math.atan2(dy, dx);
+        const h = ((angle * 180 / Math.PI) + 360) % 360;
+        const s = dist / radius;
+        const [r, g, b] = hsvToRgb(h, s, 1);
+        img.data[i] = r;
+        img.data[i + 1] = g;
+        img.data[i + 2] = b;
+        img.data[i + 3] = 255;
+      } else {
+        img.data[i + 3] = 0;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function hsvToRgb(h, s, v) {
+  const c = v * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = v - c;
+  let r, g, b;
+  if (h < 60) { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0, s = max === 0 ? 0 : d / max, v = max;
+  if (d !== 0) {
+    if (max === r) h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+    if (h < 0) h += 360;
+  }
+  return [h, s, v];
+}
+
+function updateFromHSV() {
+  const [r, g, b] = hsvToRgb(pickedH, pickedS, pickedV);
+  colorSwatch.style.background = `rgb(${r},${g},${b})`;
+  if (colorMode === "8bit") {
+    colorR.value = r; colorG.value = g; colorB.value = b;
+    colorR.step = 1; colorG.step = 1; colorB.step = 1;
+    colorR.max = 255; colorG.max = 255; colorB.max = 255;
+  } else {
+    colorR.value = (r / 255).toFixed(3);
+    colorG.value = (g / 255).toFixed(3);
+    colorB.value = (b / 255).toFixed(3);
+    colorR.step = 0.001; colorG.step = 0.001; colorB.step = 0.001;
+    colorR.max = 1; colorG.max = 1; colorB.max = 1;
+  }
+  // Update cursor position
+  const angle = pickedH * Math.PI / 180;
+  const dist = pickedS * radius;
+  colorCursor.style.left = (cx + Math.cos(angle) * dist) + "px";
+  colorCursor.style.top = (cy + Math.sin(angle) * dist) + "px";
+  colorBrightness.value = Math.round(pickedV * 100);
+}
+
+function pickFromWheel(e) {
+  const rect = colorWheel.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const dx = x - cx, dy = y - cy;
+  const dist = Math.min(Math.sqrt(dx * dx + dy * dy), radius);
+  pickedH = ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360;
+  pickedS = dist / radius;
+  updateFromHSV();
+}
+
+let wheelDragging = false;
+colorWheel.addEventListener("pointerdown", (e) => {
+  wheelDragging = true;
+  colorWheel.setPointerCapture(e.pointerId);
+  pickFromWheel(e);
+});
+colorWheel.addEventListener("pointermove", (e) => {
+  if (wheelDragging) pickFromWheel(e);
+});
+colorWheel.addEventListener("pointerup", () => { wheelDragging = false; });
+
+colorBrightness.addEventListener("input", () => {
+  pickedV = colorBrightness.value / 100;
+  updateFromHSV();
+});
+
+function readRGBInputs() {
+  let r, g, b;
+  if (colorMode === "8bit") {
+    r = Math.max(0, Math.min(255, parseInt(colorR.value) || 0));
+    g = Math.max(0, Math.min(255, parseInt(colorG.value) || 0));
+    b = Math.max(0, Math.min(255, parseInt(colorB.value) || 0));
+  } else {
+    r = Math.round(Math.max(0, Math.min(1, parseFloat(colorR.value) || 0)) * 255);
+    g = Math.round(Math.max(0, Math.min(1, parseFloat(colorG.value) || 0)) * 255);
+    b = Math.round(Math.max(0, Math.min(1, parseFloat(colorB.value) || 0)) * 255);
+  }
+  [pickedH, pickedS, pickedV] = rgbToHsv(r, g, b);
+  updateFromHSV();
+}
+
+colorR.addEventListener("change", readRGBInputs);
+colorG.addEventListener("change", readRGBInputs);
+colorB.addEventListener("change", readRGBInputs);
+
+mode8bit.addEventListener("click", () => {
+  colorMode = "8bit";
+  mode8bit.classList.add("active");
+  modeFloat.classList.remove("active");
+  updateFromHSV();
+});
+modeFloat.addEventListener("click", () => {
+  colorMode = "float";
+  modeFloat.classList.add("active");
+  mode8bit.classList.remove("active");
+  updateFromHSV();
+});
+
+function openColorPopup(animName) {
+  colorPopupTitle.textContent = animName + " — Color";
+  colorPopup.classList.add("open");
+}
+
+document.getElementById("color-popup-close").addEventListener("click", () => {
+  colorPopup.classList.remove("open");
+});
+colorPopup.addEventListener("click", (e) => {
+  if (e.target === colorPopup) colorPopup.classList.remove("open");
+});
+document.getElementById("color-apply").addEventListener("click", () => {
+  colorPopup.classList.remove("open");
+});
+
+document.querySelectorAll(".act-color").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const name = getAnimName(btn);
+    setSelectedAnim(name);
+    openColorPopup(name);
+  });
+});
+
+// Draw wheel on load
+drawWheel();
+updateFromHSV();
+</script>
+</body>
+</html>
