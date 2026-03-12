@@ -1,0 +1,14 @@
+{
+  "name": "Ocean Waves",
+  "description": "Gentle wave of cool blue and teal tones",
+  "author": "Adamlights",
+  "version": "1.0.0",
+  "category": "nature",
+  "defaults": {
+    "fps": 20,
+    "in": 0,
+    "out": 0
+  },
+  "preview": "preview.mp4",
+  "thumbnail": "thumbnail.jpg"
+}

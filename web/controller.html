@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>LED Controller</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ------------------------------------------------------------------ */
 /* Reset & tokens                                                      */
@@ -11,16 +14,16 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg-body:   #1c1c1c;
-  --bg-panel:  #2a2a2a;
-  --bg-card:   #333;
-  --border:    #444;
+  --bg-body:   #121620;
+  --bg-panel:  #1a1f2e;
+  --bg-card:   #212738;
+  --border:    #2e3650;
   --text:      #d4d4d4;
   --text-dim:  #888;
   --accent:    #d4832f;
   --accent-h:  #b56a1e;
-  --btn:       #3a3a3a;
-  --btn-h:     #4a4a4a;
+  --btn:       #242a3a;
+  --btn-h:     #2e3548;
   --radius:    8px;
   --tab-h:     52px;
   --safe-b:    env(safe-area-inset-bottom, 0px);
@@ -29,7 +32,7 @@
 html, body { height: 100%; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg-body);
   color: var(--text);
   overflow: hidden;
@@ -98,16 +101,35 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   font-size: 0.8rem;
   padding: 0 14px;
   height: 100%;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -4px;
+  padding-bottom: 4px;
 }
 
 /* Bottom tabs (mobile / RPi) */
 .tabs--bottom {
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
+  background: transparent;
+  border-top: none;
   padding-bottom: var(--safe-b);
 }
-
-@media (min-width: 900px) { .tabs--bottom { display: none; } }
+.mobile-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+.mobile-bar .bar-logo {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  flex-shrink: 0;
+}
+.mobile-bar .bar-logo img {
+  height: 24px;
+  opacity: 0.8;
+}
+.mobile-bar .tabs--bottom { flex: 1; }
+@media (min-width: 900px) { .mobile-bar { display: none; } }
 
 /* ------------------------------------------------------------------ */
 /* Room container                                                      */
@@ -242,13 +264,26 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   padding: 40px 16px 16px;
   background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
   display: flex;
+  align-items: center;
+  gap: 14px;
+  z-index: 1;
+}
+.anim-overlay .overlay-ball {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  opacity: 0.85;
+}
+.anim-overlay .overlay-right {
+  flex: 1;
+  display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 1;
 }
 
 .anim-info {
-  text-align: center;
+  text-align: left;
 }
 .anim-info h3 { font-size: 1rem; margin-bottom: 4px; color: #fff; }
 .anim-info p { font-size: 0.75rem; color: rgba(255,255,255,0.7); }
@@ -256,7 +291,6 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 .anim-actions {
   display: flex;
   gap: 8px;
-  justify-content: center;
 }
 
 .swipe-dots {
@@ -366,6 +400,19 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   padding: 40px 16px 16px;
   background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.anim-detail .detail-ball {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  opacity: 0.85;
+}
+.anim-detail .detail-right {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -629,39 +676,286 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 }
 
 /* ------------------------------------------------------------------ */
-/* Room 3: Effect Properties                                           */
+/* Room 3: Effects — editor-like layout                                */
 /* ------------------------------------------------------------------ */
-.props-form {
-  display: grid;
-  grid-template-columns: 100px 1fr;
-  gap: 12px 16px;
-  align-items: center;
-  max-width: 500px;
+.effects-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
 }
-.props-form label { text-align: right; }
-.props-form .full-width { grid-column: 1 / -1; }
 
-.effect-mini-preview {
-  width: 100%;
-  aspect-ratio: 16/9;
+/* Preview / player pane */
+.effects-preview {
+  flex: 0 0 40%;
+  min-height: 100px;
   background: #000;
   border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
+  font-size: 1.2rem;
+  position: relative;
 }
-
-.slider-row {
+.effects-preview video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius);
+}
+.effects-preview .fx-placeholder-text {
+  z-index: 1;
+  pointer-events: none;
+}
+.effects-preview .effect-transport {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 12px 10px;
+  background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+/* Scrub bar */
+.fx-scrub {
+  width: 100%;
+  height: 8px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 4px;
+  position: relative;
+  cursor: pointer;
+  touch-action: none;
+}
+.fx-scrub-played {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  pointer-events: none;
+  width: 0%;
+}
+/* Trim region highlight */
+.fx-scrub-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(68,170,255,0.2);
+  pointer-events: none;
+  border-radius: 4px;
+}
+/* Dimmed areas outside trim */
+.fx-scrub-dim-left, .fx-scrub-dim-right {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(0,0,0,0.45);
+  pointer-events: none;
+}
+.fx-scrub-dim-left { left: 0; border-radius: 4px 0 0 4px; }
+.fx-scrub-dim-right { right: 0; border-radius: 0 4px 4px 0; }
+/* In/Out markers */
+.fx-scrub-in, .fx-scrub-out {
+  position: absolute;
+  top: -4px;
+  width: 3px;
+  height: 16px;
+  background: #4af;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 3;
+}
+.fx-scrub-in { left: 0%; }
+.fx-scrub-out { left: 100%; }
+.fx-scrub-handle {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+  pointer-events: none;
+  left: 0%;
+}
+/* Transport controls row */
+.fx-transport-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.slider-row input[type="range"] {
-  flex: 1;
-  accent-color: var(--accent);
+.fx-transport-row .transport-btn {
+  background: transparent;
+  color: #fff;
+  font-size: 1.1rem;
+  padding: 2px 4px;
+  line-height: 1;
 }
-.slider-row .val { font-size: 0.75rem; color: var(--text-dim); min-width: 30px; text-align: right; }
+.fx-transport-row .transport-btn:hover { color: var(--accent); }
+.fx-transport-row .transport-time {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.7);
+  font-family: monospace;
+  min-width: 80px;
+}
+.fx-trim-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.fx-trim-inputs label {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.5);
+}
+.fx-trim-inputs input {
+  width: 50px;
+  padding: 3px 5px;
+  font-size: 0.7rem;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  text-align: center;
+}
+.effects-preview .effect-name-overlay {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  font-size: 0.85rem;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+
+/* List panel (right / bottom) */
+.effects-list-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.effects-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.effects-toolbar .tab-switch {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-body);
+  border-radius: 6px;
+  padding: 2px;
+}
+.effects-toolbar .tab-switch button {
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+}
+.effects-toolbar .tab-switch button.active {
+  background: var(--accent);
+  color: #fff;
+}
+.effects-search {
+  flex: 1;
+  min-width: 120px;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+}
+
+/* Effect rows — local library */
+.effects-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+}
+.effect-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.effect-row:hover { border-color: var(--accent); }
+.effect-row.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.effect-row .effect-thumb {
+  width: 48px;
+  height: 32px;
+  border-radius: 4px;
+  background: #222;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.effect-row .effect-info {
+  flex: 1;
+  min-width: 0;
+}
+.effect-row .effect-info h4 {
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.effect-row .effect-info p {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.effect-row .effect-speed {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.effect-row .effect-delete {
+  background: transparent;
+  color: var(--text-dim);
+  padding: 4px;
+  font-size: 0.9rem;
+}
+.effect-row .effect-delete:hover { color: var(--accent); }
+
+/* Online rows */
+.effect-row .effect-dl-btn {
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.effect-row .effect-status {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.effect-status.installed { background: #2a3a2a; color: #6ee7b7; }
+.effect-status.available { background: #2e3348; color: var(--text-dim); }
+.effect-status.update    { background: #3a3020; color: #fbbf24; }
+
+/* Landscape: side by side */
+@media (orientation: landscape), (min-width: 900px) {
+  .effects-layout { flex-direction: row; }
+  .effects-preview { flex: 0 0 50%; min-height: unset; }
+  .effects-list-panel { flex: 1; }
+}
 
 /* ------------------------------------------------------------------ */
 /* Color picker popup                                                  */
@@ -932,7 +1226,54 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 
 
 /* ------------------------------------------------------------------ */
-/* Room 5 & 6: Placeholder                                             */
+/* Room 5: Hardware Setup                                              */
+/* ------------------------------------------------------------------ */
+.hw-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.hw-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hw-section .section-title { margin-bottom: 0; }
+.hw-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+.hw-row label {
+  min-width: 90px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+.hw-row select, .hw-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+/* RGB mode notice */
+.rgb-notice {
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rgb-notice .notice-icon { font-size: 1.1rem; }
+
+/* ------------------------------------------------------------------ */
+/* Room 6: Placeholder                                                 */
 /* ------------------------------------------------------------------ */
 .placeholder-room {
   display: flex;
@@ -955,7 +1296,7 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 <!-- Top header (laptop)                                               -->
 <!-- ================================================================ -->
 <header class="app-header">
-  <h1>LED Controller</h1>
+  <img src="corp/ADAMLIGHTS_LOGO_Shaded_Transparent.png" alt="Adamlights" style="height:41px">
   <nav class="tabs tabs--top" id="tabs-top"></nav>
 </header>
 
@@ -970,68 +1311,86 @@ label { font-size: 0.8rem; color: var(--text-dim); }
     <!-- Mobile swipe view -->
     <div class="anim-swipe">
       <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#e94560,#0f3460)"></div>
+        <div class="anim-preview" style="background:linear-gradient(135deg,#001689,#000a2e)"></div>
         <div class="anim-overlay">
-          <div class="anim-info"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
-          <div class="anim-actions">
-            <button class="btn btn--sm act-edit">Edit</button>
-            <button class="btn btn--sm act-color">Color</button>
-            <button class="btn btn--sm act-triggers">Triggers</button>
+          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+          <div class="overlay-right">
+            <div class="anim-info"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
+            <div class="anim-actions">
+              <button class="btn btn--sm act-edit">Edit</button>
+              <button class="btn btn--sm act-color">Color</button>
+              <button class="btn btn--sm act-triggers">Triggers</button>
+            </div>
           </div>
         </div>
       </div>
       <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#6ee7b7,#0f3460)"></div>
+        <div class="anim-preview" style="background:linear-gradient(135deg,#0014a0,#001040)"></div>
         <div class="anim-overlay">
-          <div class="anim-info"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
-          <div class="anim-actions">
-            <button class="btn btn--sm act-edit">Edit</button>
-            <button class="btn btn--sm act-color">Color</button>
-            <button class="btn btn--sm act-triggers">Triggers</button>
+          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+          <div class="overlay-right">
+            <div class="anim-info"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
+            <div class="anim-actions">
+              <button class="btn btn--sm act-edit">Edit</button>
+              <button class="btn btn--sm act-color">Color</button>
+              <button class="btn btn--sm act-triggers">Triggers</button>
+            </div>
           </div>
         </div>
       </div>
       <div class="anim-slide">
         <div class="anim-preview" style="background:linear-gradient(135deg,#c084fc,#1a1a2e)"></div>
         <div class="anim-overlay">
-          <div class="anim-info"><h3>Cozy Warm</h3><p>Warm white fade</p></div>
-          <div class="anim-actions">
-            <button class="btn btn--sm act-edit">Edit</button>
-            <button class="btn btn--sm act-color">Color</button>
-            <button class="btn btn--sm act-triggers">Triggers</button>
+          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+          <div class="overlay-right">
+            <div class="anim-info"><h3>Cozy Warm</h3><p>Warm white fade</p></div>
+            <div class="anim-actions">
+              <button class="btn btn--sm act-edit">Edit</button>
+              <button class="btn btn--sm act-color">Color</button>
+              <button class="btn btn--sm act-triggers">Triggers</button>
+            </div>
           </div>
         </div>
       </div>
       <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#fbbf24,#e94560)"></div>
+        <div class="anim-preview" style="background:linear-gradient(135deg,#001689,#002080)"></div>
         <div class="anim-overlay">
-          <div class="anim-info"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
-          <div class="anim-actions">
-            <button class="btn btn--sm act-edit">Edit</button>
-            <button class="btn btn--sm act-color">Color</button>
-            <button class="btn btn--sm act-triggers">Triggers</button>
+          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+          <div class="overlay-right">
+            <div class="anim-info"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
+            <div class="anim-actions">
+              <button class="btn btn--sm act-edit">Edit</button>
+              <button class="btn btn--sm act-color">Color</button>
+              <button class="btn btn--sm act-triggers">Triggers</button>
+            </div>
           </div>
         </div>
       </div>
       <div class="anim-slide">
         <div class="anim-preview" style="background:linear-gradient(135deg,#38bdf8,#1e3a5f)"></div>
         <div class="anim-overlay">
-          <div class="anim-info"><h3>Ocean Breeze</h3><p>Gentle blue undulation</p></div>
-          <div class="anim-actions">
-            <button class="btn btn--sm act-edit">Edit</button>
-            <button class="btn btn--sm act-color">Color</button>
-            <button class="btn btn--sm act-triggers">Triggers</button>
+          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+          <div class="overlay-right">
+            <div class="anim-info"><h3>Ocean Breeze</h3><p>Gentle blue undulation</p></div>
+            <div class="anim-actions">
+              <button class="btn btn--sm act-edit">Edit</button>
+              <button class="btn btn--sm act-color">Color</button>
+              <button class="btn btn--sm act-triggers">Triggers</button>
+            </div>
           </div>
         </div>
       </div>
       <div class="anim-slide">
         <div class="anim-preview" style="background:linear-gradient(135deg,#f472b6,#7c3aed)"></div>
         <div class="anim-overlay">
-          <div class="anim-info"><h3>Party Strobe</h3><p>High-energy color flash</p></div>
-          <div class="anim-actions">
-            <button class="btn btn--sm act-edit">Edit</button>
-            <button class="btn btn--sm act-color">Color</button>
-            <button class="btn btn--sm act-triggers">Triggers</button>
+          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+          <div class="overlay-right">
+            <div class="anim-info"><h3>Party Strobe</h3><p>High-energy color flash</p></div>
+            <div class="anim-actions">
+              <button class="btn btn--sm act-edit">Edit</button>
+              <button class="btn btn--sm act-color">Color</button>
+              <button class="btn btn--sm act-triggers">Triggers</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1040,12 +1399,12 @@ label { font-size: 0.8rem; color: var(--text-dim); }
     <!-- Desktop grid view -->
     <div class="anim-grid">
       <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#e94560,#0f3460)">Preview</div>
+        <div class="thumb" style="background:linear-gradient(135deg,#001689,#000a2e)">Preview</div>
         <div class="meta"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
         <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
       </div>
       <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#6ee7b7,#0f3460)">Preview</div>
+        <div class="thumb" style="background:linear-gradient(135deg,#0014a0,#001040)">Preview</div>
         <div class="meta"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
         <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
       </div>
@@ -1055,7 +1414,7 @@ label { font-size: 0.8rem; color: var(--text-dim); }
         <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
       </div>
       <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#fbbf24,#e94560)">Preview</div>
+        <div class="thumb" style="background:linear-gradient(135deg,#001689,#002080)">Preview</div>
         <div class="meta"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
         <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
       </div>
@@ -1073,7 +1432,7 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 
     <!-- Detail view (desktop: replaces grid on card click) -->
     <div class="anim-detail" id="anim-detail">
-      <div class="detail-preview" id="detail-preview" style="background:linear-gradient(135deg,#e94560,#0f3460)"></div>
+      <div class="detail-preview" id="detail-preview" style="background:linear-gradient(135deg,#001689,#000a2e)"></div>
       <div class="detail-overlay-top">
         <div class="detail-toolbar">
           <button class="btn btn--sm" id="detail-back">&larr; Back</button>
@@ -1082,14 +1441,17 @@ label { font-size: 0.8rem; color: var(--text-dim); }
         </div>
       </div>
       <div class="detail-overlay-bottom">
-        <div class="detail-actions">
-          <button class="btn act-edit" id="detail-act-edit">Edit Animation</button>
-          <button class="btn act-color" id="detail-act-color">Set Color</button>
-          <button class="btn act-triggers" id="detail-act-triggers">Configure Triggers</button>
-        </div>
-        <div class="detail-nav">
-          <button class="btn btn--sm" id="detail-prev">&larr; Prev</button>
-          <button class="btn btn--sm" id="detail-next">Next &rarr;</button>
+        <img class="detail-ball" src="corp/onlyballfromlogo.png" alt="">
+        <div class="detail-right">
+          <div class="detail-actions">
+            <button class="btn act-edit" id="detail-act-edit">Edit Animation</button>
+            <button class="btn act-color" id="detail-act-color">Set Color</button>
+            <button class="btn act-triggers" id="detail-act-triggers">Configure Triggers</button>
+          </div>
+          <div class="detail-nav">
+            <button class="btn btn--sm" id="detail-prev">&larr; Prev</button>
+            <button class="btn btn--sm" id="detail-next">Next &rarr;</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1237,59 +1599,104 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   <!-- Room 3: Effect Properties ----------------------------------- -->
   <div class="room" id="room-effects">
     <div class="context-bar">
-      <span class="context-label">Editing:</span>
-      <span class="context-name" id="effects-anim-name">Rainbow Wave</span>
-      <span class="context-sep">&#x25B8;</span>
-      <span class="context-name" id="effects-effect-name">Rainbow Wave</span>
+      <span class="context-label">Effects</span>
+      <button class="btn btn--sm" id="effects-back-editor">&larr; Editor</button>
     </div>
-    <div class="props-form">
-      <div class="full-width effect-mini-preview">Effect Preview</div>
+    <div class="effects-layout">
 
-      <label>Effect</label>
-      <select id="effect-select">
-        <option>Rainbow Wave</option>
-        <option>Sparkle</option>
-        <option>Solid Color</option>
-        <option>Fire</option>
-        <option>Breathing</option>
-        <option>Custom Video</option>
-      </select>
-
-      <label>Speed</label>
-      <div class="slider-row">
-        <input type="range" min="1" max="100" value="50">
-        <span class="val">50%</span>
+      <!-- Left / Top: preview player -->
+      <div class="effects-preview" id="effects-preview">
+        <span class="fx-placeholder-text">Select an effect</span>
+        <video id="fx-video" muted loop playsinline style="display:none"></video>
+        <span class="effect-name-overlay" id="fx-preview-name"></span>
+        <div class="effect-transport" id="fx-transport" style="display:none">
+          <div class="fx-scrub" id="fx-scrub">
+            <div class="fx-scrub-dim-left" id="fx-scrub-dim-left"></div>
+            <div class="fx-scrub-dim-right" id="fx-scrub-dim-right"></div>
+            <div class="fx-scrub-region" id="fx-scrub-region"></div>
+            <div class="fx-scrub-played" id="fx-scrub-played"></div>
+            <div class="fx-scrub-in" id="fx-scrub-in"></div>
+            <div class="fx-scrub-out" id="fx-scrub-out"></div>
+            <div class="fx-scrub-handle" id="fx-scrub-handle"></div>
+          </div>
+          <div class="fx-transport-row">
+            <button class="transport-btn" id="fx-play">&#x25B6;</button>
+            <span class="transport-time" id="fx-time">0:00 / 0:00</span>
+            <div class="fx-trim-inputs">
+              <label>In (f)</label>
+              <input type="number" id="fx-in" value="0" min="0" step="1">
+              <label>Out (f)</label>
+              <input type="number" id="fx-out" value="0" min="0" step="1">
+              <label>FPS</label>
+              <input type="number" id="fx-speed" value="30" min="1" max="120" step="1">
+            </div>
+          </div>
+        </div>
       </div>
 
-      <label>Intensity</label>
-      <div class="slider-row">
-        <input type="range" min="0" max="100" value="80">
-        <span class="val">80%</span>
-      </div>
+      <!-- Right / Bottom: effect list -->
+      <div class="effects-list-panel">
+        <div class="effects-toolbar">
+          <div class="tab-switch" id="fx-tab-switch">
+            <button class="active" data-fx-tab="local">Installed</button>
+            <button data-fx-tab="online">Online</button>
+          </div>
+          <input type="text" class="effects-search" id="fx-search" placeholder="Search effects...">
+        </div>
 
-      <label>Color 1</label>
-      <input type="color" value="#e94560" style="width:60px;height:32px;padding:2px;border:1px solid var(--border)">
+        <!-- Local / installed list (populated from effects/ folder) -->
+        <div class="effects-item-list" id="fx-local-list"></div>
 
-      <label>Color 2</label>
-      <input type="color" value="#0f3460" style="width:60px;height:32px;padding:2px;border:1px solid var(--border)">
+        <!-- Online list (hidden by default) -->
+        <div class="effects-item-list" id="fx-online-list" style="display:none">
+          <div class="card effect-row" data-effect="Rainbow Pack">
+            <div class="effect-info">
+              <h4>Rainbow Pack</h4>
+              <p>6 rainbow variations — wave, spiral, burst, fade, strobe, pulse</p>
+            </div>
+            <span class="effect-status installed">Installed</span>
+          </div>
+          <div class="card effect-row" data-effect="Nature Collection">
+            <div class="effect-info">
+              <h4>Nature Collection</h4>
+              <p>Fire, water, aurora, lightning, rain, sunset effects</p>
+            </div>
+            <span class="effect-status update">Update</span>
+            <button class="btn btn--sm effect-dl-btn">Update</button>
+          </div>
+          <div class="card effect-row" data-effect="Holiday Pack">
+            <div class="effect-info">
+              <h4>Holiday Pack</h4>
+              <p>Christmas, Halloween, New Year, Valentine themed effects</p>
+            </div>
+            <span class="effect-status available">Available</span>
+            <button class="btn btn--sm btn--accent effect-dl-btn">Download</button>
+          </div>
+          <div class="card effect-row" data-effect="Party Essentials">
+            <div class="effect-info">
+              <h4>Party Essentials</h4>
+              <p>Strobe, color cycle, bass reactive, DJ sync patterns</p>
+            </div>
+            <span class="effect-status available">Available</span>
+            <button class="btn btn--sm btn--accent effect-dl-btn">Download</button>
+          </div>
+          <div class="card effect-row" data-effect="Ambient Pack">
+            <div class="effect-info">
+              <h4>Ambient Pack</h4>
+              <p>Candle, breathing, slow fade, warm glow, starlight</p>
+            </div>
+            <span class="effect-status installed">Installed</span>
+          </div>
+          <div class="card effect-row" data-effect="Retro Arcade">
+            <div class="effect-info">
+              <h4>Retro Arcade</h4>
+              <p>8-bit pixel chase, scanner, tetris drop, pac-man</p>
+            </div>
+            <span class="effect-status available">Available</span>
+            <button class="btn btn--sm btn--accent effect-dl-btn">Download</button>
+          </div>
+        </div>
 
-      <label>Direction</label>
-      <select>
-        <option>Forward</option>
-        <option>Reverse</option>
-        <option>Bounce</option>
-        <option>Random</option>
-      </select>
-
-      <label>Blend</label>
-      <select>
-        <option>Cross-fade</option>
-        <option>Cut</option>
-        <option>Dissolve</option>
-      </select>
-
-      <div class="full-width" style="margin-top:8px">
-        <button class="btn btn--accent">Apply</button>
       </div>
     </div>
   </div>
@@ -1499,10 +1906,34 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 
   <!-- Room 5: Hardware Setup -------------------------------------- -->
   <div class="room" id="room-hardware">
-    <div class="placeholder-room">
-      <div class="icon">&#x2699;</div>
-      <h2>Hardware Setup</h2>
-      <p>Configure controllers, LED strips, port assignments, and network settings.</p>
+    <div class="hw-layout">
+
+      <!-- Controller settings -->
+      <div class="hw-section">
+        <div class="section-title">Controller</div>
+        <div class="hw-row">
+          <label>Format</label>
+          <select id="hw-format">
+            <option value="dm1812">DM1812</option>
+            <option value="dmx512">DMX512</option>
+            <option value="qed3110">QED3110</option>
+          </select>
+        </div>
+        <div class="hw-row">
+          <label>LED Type</label>
+          <select id="hw-led-type">
+            <option value="smartled">SmartLED</option>
+            <option value="rgb">RGB</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- RGB mode notice (shown when RGB selected) -->
+      <div class="rgb-notice" id="rgb-notice" style="display:none">
+        <span class="notice-icon">&#x24D8;</span>
+        <span>RGB mode — built-in effects only. Effects tab is disabled. Switch to SmartLED for custom effects and file import.</span>
+      </div>
+
     </div>
   </div>
 
@@ -1551,7 +1982,10 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 <!-- ================================================================ -->
 <!-- Bottom tab bar (mobile / RPi)                                     -->
 <!-- ================================================================ -->
-<nav class="tabs tabs--bottom" id="tabs-bottom"></nav>
+<div class="mobile-bar">
+  <div class="bar-logo"><img src="corp/onlyballfromlogo.png" alt=""></div>
+  <nav class="tabs tabs--bottom" id="tabs-bottom"></nav>
+</div>
 
 <!-- ================================================================ -->
 <!-- Script                                                            -->
@@ -1859,29 +2293,19 @@ let selectedAnimName = "Rainbow Wave";
 let selectedEffectName = "Rainbow Wave";
 
 const editorAnimName = document.getElementById("editor-anim-name");
-const effectsAnimName = document.getElementById("effects-anim-name");
-const effectsEffectName = document.getElementById("effects-effect-name");
 const triggersAnimName = document.getElementById("triggers-anim-name");
 const triggersEffectName = document.getElementById("triggers-effect-name");
-const effectSelect = document.getElementById("effect-select");
 
 function setSelectedAnim(name) {
   selectedAnimName = name;
   editorAnimName.textContent = name;
-  effectsAnimName.textContent = name;
   triggersAnimName.textContent = name;
 }
 
 function setSelectedEffect(name) {
   selectedEffectName = name;
-  effectsEffectName.textContent = name;
   triggersEffectName.textContent = name;
 }
-
-// Effect select updates breadcrumb
-effectSelect.addEventListener("change", () => {
-  setSelectedEffect(effectSelect.value);
-});
 
 // ================================================================== //
 // Helper: get animation name from nearest context
@@ -2307,6 +2731,307 @@ document.querySelectorAll(".act-color").forEach(btn => {
     setSelectedAnim(name);
     openColorPopup(name);
   });
+});
+
+// ================================================================== //
+// Hardware Setup — LED type toggle
+// ================================================================== //
+const hwLedType = document.getElementById("hw-led-type");
+const rgbNotice = document.getElementById("rgb-notice");
+const effectsTab = document.querySelectorAll("[data-room='effects']");
+
+function updateLedType() {
+  const isRgb = hwLedType.value === "rgb";
+  rgbNotice.style.display = isRgb ? "" : "none";
+  effectsTab.forEach(btn => {
+    btn.style.display = isRgb ? "none" : "";
+  });
+  if (isRgb && document.getElementById("room-effects").classList.contains("active")) {
+    switchRoom("select");
+  }
+}
+hwLedType.addEventListener("change", updateLedType);
+updateLedType();
+
+// ================================================================== //
+// Effects panel — load from folder, video playback, transport
+// ================================================================== //
+const fxLocalList = document.getElementById("fx-local-list");
+const fxOnlineList = document.getElementById("fx-online-list");
+const fxTabSwitch = document.getElementById("fx-tab-switch");
+const fxSearch = document.getElementById("fx-search");
+const fxPreviewName = document.getElementById("fx-preview-name");
+const fxInInput = document.getElementById("fx-in");
+const fxOutInput = document.getElementById("fx-out");
+const fxSpeedInput = document.getElementById("fx-speed");
+const fxVideo = document.getElementById("fx-video");
+const fxTransport = document.getElementById("fx-transport");
+const fxPlayBtn = document.getElementById("fx-play");
+const fxTimeDisplay = document.getElementById("fx-time");
+const fxScrub = document.getElementById("fx-scrub");
+const fxScrubPlayed = document.getElementById("fx-scrub-played");
+const fxScrubHandle = document.getElementById("fx-scrub-handle");
+const fxScrubIn = document.getElementById("fx-scrub-in");
+const fxScrubOut = document.getElementById("fx-scrub-out");
+const fxPlaceholder = document.querySelector(".fx-placeholder-text");
+
+const effectsCache = {};
+
+// Load effects list — try /api/effects first (Flask), fall back to hardcoded list
+async function loadEffectsList() {
+  fxLocalList.innerHTML = "";
+  let effects = [];
+  try {
+    const res = await fetch("/api/effects");
+    if (res.ok) effects = await res.json();
+  } catch (e) { /* not running Flask */ }
+
+  // Fallback: try known names directly
+  if (!effects.length) {
+    const names = ["Aurora", "Fire", "Fireflies", "Ocean Waves", "Solid Color", "Sparkle"];
+    for (const name of names) {
+      try {
+        const r = await fetch("effects/" + name + "/meta.json");
+        if (r.ok) effects.push(await r.json());
+      } catch (e) { /* skip */ }
+    }
+  }
+
+  for (const meta of effects) {
+    const name = meta.name;
+    effectsCache[name] = meta;
+    const row = document.createElement("div");
+    row.className = "card effect-row";
+    row.dataset.effect = name;
+    row.innerHTML = `
+      <img class="effect-thumb" src="effects/${name}/${meta.thumbnail}" alt="">
+      <div class="effect-info">
+        <h4>${meta.name}</h4>
+        <p>${meta.description}</p>
+      </div>
+      <span class="effect-speed">${meta.defaults.fps} fps</span>
+      <button class="effect-delete">&#x2715;</button>`;
+    fxLocalList.appendChild(row);
+  }
+}
+loadEffectsList();
+
+// Back button
+document.getElementById("effects-back-editor").addEventListener("click", () => {
+  switchRoom("editor");
+});
+
+// Tab switching (Installed / Online)
+fxTabSwitch.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-fx-tab]");
+  if (!btn) return;
+  fxTabSwitch.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  const tab = btn.dataset.fxTab;
+  fxLocalList.style.display = tab === "local" ? "" : "none";
+  fxOnlineList.style.display = tab === "online" ? "" : "none";
+});
+
+// Search / filter
+fxSearch.addEventListener("input", () => {
+  const q = fxSearch.value.toLowerCase();
+  const activeList = fxLocalList.style.display !== "none" ? fxLocalList : fxOnlineList;
+  activeList.querySelectorAll(".effect-row").forEach(row => {
+    const name = (row.dataset.effect || "").toLowerCase();
+    const desc = (row.querySelector(".effect-info p")?.textContent || "").toLowerCase();
+    row.style.display = (name.includes(q) || desc.includes(q)) ? "" : "none";
+  });
+});
+
+// Format time mm:ss.t
+function fxFmtTime(t) {
+  if (!isFinite(t) || t < 0) return "0:00";
+  const m = Math.floor(t / 60);
+  const s = (t % 60).toFixed(1).padStart(4, "0");
+  return m + ":" + s;
+}
+
+// Video playback state
+let fxPlaying = false;
+let fxRafId = null;
+let fxInFrames = 0;     // trim: frames from start
+let fxOutFrames = 0;    // trim: frames from end
+let fxBaseFps = 30;     // video native fps (assumed)
+let fxTotalFrames = 0;  // total frames in video
+
+const fxScrubRegion = document.getElementById("fx-scrub-region");
+const fxScrubDimLeft = document.getElementById("fx-scrub-dim-left");
+const fxScrubDimRight = document.getElementById("fx-scrub-dim-right");
+
+// Convert frame-based in/out to seconds
+function fxGetFps() { return parseInt(fxSpeedInput.value) || 30; }
+function fxInSeconds() { return fxInFrames / fxGetFps(); }
+function fxOutSeconds() {
+  // out = frames from end, so effective out time = duration - (outFrames / fps)
+  const dur = fxVideo.duration || 0;
+  if (fxOutFrames <= 0) return dur;
+  return Math.max(0, dur - (fxOutFrames / fxGetFps()));
+}
+
+// Compute playback rate from desired fps vs video native fps
+function fxApplySpeed() {
+  const targetFps = fxGetFps();
+  fxVideo.playbackRate = Math.max(0.1, Math.min(4, targetFps / fxBaseFps));
+}
+fxSpeedInput.addEventListener("change", () => { fxApplySpeed(); fxUpdateMarkers(); });
+fxSpeedInput.addEventListener("input", () => { fxApplySpeed(); fxUpdateMarkers(); });
+
+function fxUpdateScrub() {
+  const dur = fxVideo.duration || 1;
+  const inSec = fxInSeconds();
+  const outSec = fxOutSeconds();
+  const pct = (fxVideo.currentTime / dur) * 100;
+  fxScrubPlayed.style.width = pct + "%";
+  fxScrubHandle.style.left = pct + "%";
+
+  const curFrame = Math.round(fxVideo.currentTime * fxGetFps());
+  fxTimeDisplay.textContent = fxFmtTime(fxVideo.currentTime) + " / " + fxFmtTime(dur) + "  f:" + curFrame;
+
+  // Enforce in/out region during playback
+  if (fxPlaying) {
+    if (fxVideo.currentTime < inSec) fxVideo.currentTime = inSec;
+    if (fxVideo.currentTime >= outSec) fxVideo.currentTime = inSec;
+  }
+
+  if (fxPlaying) fxRafId = requestAnimationFrame(fxUpdateScrub);
+}
+
+// Play / Pause
+fxPlayBtn.addEventListener("click", () => {
+  if (fxVideo.style.display === "none") return;
+  if (fxPlaying) {
+    fxVideo.pause();
+    fxPlaying = false;
+    fxPlayBtn.innerHTML = "&#x25B6;";
+    cancelAnimationFrame(fxRafId);
+  } else {
+    const inSec = fxInSeconds();
+    const outSec = fxOutSeconds();
+    if (fxVideo.currentTime < inSec || fxVideo.currentTime >= outSec) {
+      fxVideo.currentTime = inSec;
+    }
+    fxApplySpeed();
+    fxVideo.play();
+    fxPlaying = true;
+    fxPlayBtn.innerHTML = "&#x23F8;";
+    fxRafId = requestAnimationFrame(fxUpdateScrub);
+  }
+});
+
+// Scrub bar drag
+let fxScrubbing = false;
+function fxScrubTo(e) {
+  const rect = fxScrub.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  fxVideo.currentTime = pct * (fxVideo.duration || 0);
+  fxUpdateScrub();
+}
+fxScrub.addEventListener("pointerdown", (e) => {
+  fxScrubbing = true;
+  fxScrub.setPointerCapture(e.pointerId);
+  fxScrubTo(e);
+});
+fxScrub.addEventListener("pointermove", (e) => { if (fxScrubbing) fxScrubTo(e); });
+fxScrub.addEventListener("pointerup", () => { fxScrubbing = false; });
+
+// In/Out markers + trim region update
+function fxUpdateMarkers() {
+  const dur = fxVideo.duration || 1;
+  const fps = fxGetFps();
+  fxTotalFrames = Math.round(dur * fps);
+  fxInFrames = Math.max(0, Math.min(fxTotalFrames, parseInt(fxInInput.value) || 0));
+  fxOutFrames = Math.max(0, Math.min(fxTotalFrames, parseInt(fxOutInput.value) || 0));
+
+  // Clamp input max to total frames
+  fxInInput.max = fxTotalFrames;
+  fxOutInput.max = fxTotalFrames;
+
+  const inSec = fxInFrames / fps;
+  const outSec = fxOutFrames > 0 ? dur - (fxOutFrames / fps) : dur;
+
+  const inPct = (inSec / dur) * 100;
+  const outPct = (outSec / dur) * 100;
+
+  fxScrubIn.style.left = inPct + "%";
+  fxScrubOut.style.left = outPct + "%";
+
+  fxScrubRegion.style.left = inPct + "%";
+  fxScrubRegion.style.width = Math.max(0, outPct - inPct) + "%";
+
+  fxScrubDimLeft.style.width = inPct + "%";
+  fxScrubDimLeft.style.display = inPct > 0 ? "" : "none";
+
+  fxScrubDimRight.style.width = (100 - outPct) + "%";
+  fxScrubDimRight.style.display = outPct < 100 ? "" : "none";
+}
+fxInInput.addEventListener("input", fxUpdateMarkers);
+fxInInput.addEventListener("change", fxUpdateMarkers);
+fxOutInput.addEventListener("input", fxUpdateMarkers);
+fxOutInput.addEventListener("change", fxUpdateMarkers);
+
+// Load effect into player
+function fxLoadEffect(name) {
+  const meta = effectsCache[name];
+  fxPreviewName.textContent = name;
+  fxPlaceholder.style.display = "none";
+  fxVideo.style.display = "";
+  fxTransport.style.display = "";
+  fxVideo.src = "effects/" + name + "/" + (meta ? meta.preview : "preview.mp4");
+  fxVideo.load();
+
+  // Set defaults from meta
+  if (meta) {
+    fxSpeedInput.value = meta.defaults.fps || 30;
+    fxInInput.value = meta.defaults.in || 0;
+    fxOutInput.value = meta.defaults.out != null && meta.defaults.out >= 0 ? meta.defaults.out : 0;
+  }
+
+  // Reset playback
+  fxPlaying = false;
+  fxPlayBtn.innerHTML = "&#x25B6;";
+  cancelAnimationFrame(fxRafId);
+
+  fxVideo.addEventListener("loadedmetadata", () => {
+    fxUpdateMarkers();
+    fxUpdateScrub();
+    fxApplySpeed();
+    const inSec = fxInSeconds();
+    if (inSec > 0) fxVideo.currentTime = inSec;
+  }, { once: true });
+}
+
+// Select effect in local list → load into player
+fxLocalList.addEventListener("click", (e) => {
+  const del = e.target.closest(".effect-delete");
+  if (del) {
+    del.closest(".effect-row").remove();
+    return;
+  }
+  const row = e.target.closest(".effect-row");
+  if (!row) return;
+  fxLocalList.querySelectorAll(".effect-row").forEach(r => r.classList.remove("selected"));
+  row.classList.add("selected");
+  fxLoadEffect(row.dataset.effect);
+});
+
+// Online list — download click (mock)
+fxOnlineList.addEventListener("click", (e) => {
+  const dlBtn = e.target.closest(".effect-dl-btn");
+  if (!dlBtn) return;
+  const row = dlBtn.closest(".effect-row");
+  const statusEl = row.querySelector(".effect-status");
+  dlBtn.textContent = "Installing...";
+  dlBtn.disabled = true;
+  setTimeout(() => {
+    statusEl.className = "effect-status installed";
+    statusEl.textContent = "Installed";
+    dlBtn.remove();
+  }, 1500);
 });
 
 // Draw wheel on load

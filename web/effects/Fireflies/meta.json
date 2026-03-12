@@ -1,0 +1,14 @@
+{
+  "name": "Fireflies",
+  "description": "Warm floating stars in lush rainforest as night butterflies glow in the warm night",
+  "author": "Adamlights",
+  "version": "1.0.0",
+  "category": "ambient",
+  "defaults": {
+    "fps": 30,
+    "in": 0,
+    "out": 0
+  },
+  "preview": "preview.mp4",
+  "thumbnail": "thumbnail.jpg"
+}
