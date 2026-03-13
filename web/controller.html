@@ -60,7 +60,7 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 .app-header h1 { font-size: 1rem; white-space: nowrap; color: #fff; }
 
 @media (min-width: 900px) {
-  .app-header { display: flex; }
+  .app-header { display: flex; height: 72px; }
   .tabs--bottom { display: none !important; }
 }
 
@@ -351,9 +351,11 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 /* Detail view (desktop: shown on card click; replaces grid) */
 .anim-detail {
   display: none;
-  position: relative;
-  height: 100%;
+  position: absolute;
+  inset: 0;
+  z-index: 10;
   overflow: hidden;
+  background: var(--bg-body);
 }
 .anim-detail.open {
   display: block;
@@ -367,6 +369,22 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   justify-content: center;
   font-size: 2rem;
   color: rgba(255,255,255,0.3);
+  background: #000;
+}
+.anim-detail .detail-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.anim-card .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.anim-slide .anim-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .anim-detail .detail-overlay-top {
   position: absolute;
@@ -647,6 +665,30 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   font-size: 0.9rem;
 }
 .clip-row .clip-delete:hover { color: var(--accent); }
+.clip-row .clip-reset {
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px 5px;
+  font-size: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.clip-row .clip-reset:hover { color: var(--accent); border-color: var(--accent); }
+.clip-row.playing { background: rgba(212,131,47,0.08); }
+
+.editor-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  position: absolute;
+  inset: 0;
+}
+.editor-preview .ed-placeholder {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
 
 .clip-list {
   display: flex;
@@ -895,8 +937,8 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 .effect-row:hover { border-color: var(--accent); }
 .effect-row.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .effect-row .effect-thumb {
-  width: 48px;
-  height: 32px;
+  width: 96px;
+  height: 64px;
   border-radius: 4px;
   background: #222;
   object-fit: cover;
@@ -1296,7 +1338,7 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 <!-- Top header (laptop)                                               -->
 <!-- ================================================================ -->
 <header class="app-header">
-  <img src="corp/ADAMLIGHTS_LOGO_Shaded_Transparent.png" alt="Adamlights" style="height:41px">
+  <img src="corp/ADAMLIGHTS_LOGO_Shaded_Transparent.png" alt="Adamlights" style="height:100px">
   <nav class="tabs tabs--top" id="tabs-top"></nav>
 </header>
 
@@ -1308,131 +1350,21 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   <!-- Room 1: Select Animation ------------------------------------ -->
   <div class="room active" id="room-select">
 
-    <!-- Mobile swipe view -->
-    <div class="anim-swipe">
-      <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#001689,#000a2e)"></div>
-        <div class="anim-overlay">
-          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
-          <div class="overlay-right">
-            <div class="anim-info"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
-            <div class="anim-actions">
-              <button class="btn btn--sm act-edit">Edit</button>
-              <button class="btn btn--sm act-color">Color</button>
-              <button class="btn btn--sm act-triggers">Triggers</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#0014a0,#001040)"></div>
-        <div class="anim-overlay">
-          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
-          <div class="overlay-right">
-            <div class="anim-info"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
-            <div class="anim-actions">
-              <button class="btn btn--sm act-edit">Edit</button>
-              <button class="btn btn--sm act-color">Color</button>
-              <button class="btn btn--sm act-triggers">Triggers</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#c084fc,#1a1a2e)"></div>
-        <div class="anim-overlay">
-          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
-          <div class="overlay-right">
-            <div class="anim-info"><h3>Cozy Warm</h3><p>Warm white fade</p></div>
-            <div class="anim-actions">
-              <button class="btn btn--sm act-edit">Edit</button>
-              <button class="btn btn--sm act-color">Color</button>
-              <button class="btn btn--sm act-triggers">Triggers</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#001689,#002080)"></div>
-        <div class="anim-overlay">
-          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
-          <div class="overlay-right">
-            <div class="anim-info"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
-            <div class="anim-actions">
-              <button class="btn btn--sm act-edit">Edit</button>
-              <button class="btn btn--sm act-color">Color</button>
-              <button class="btn btn--sm act-triggers">Triggers</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#38bdf8,#1e3a5f)"></div>
-        <div class="anim-overlay">
-          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
-          <div class="overlay-right">
-            <div class="anim-info"><h3>Ocean Breeze</h3><p>Gentle blue undulation</p></div>
-            <div class="anim-actions">
-              <button class="btn btn--sm act-edit">Edit</button>
-              <button class="btn btn--sm act-color">Color</button>
-              <button class="btn btn--sm act-triggers">Triggers</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="anim-slide">
-        <div class="anim-preview" style="background:linear-gradient(135deg,#f472b6,#7c3aed)"></div>
-        <div class="anim-overlay">
-          <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
-          <div class="overlay-right">
-            <div class="anim-info"><h3>Party Strobe</h3><p>High-energy color flash</p></div>
-            <div class="anim-actions">
-              <button class="btn btn--sm act-edit">Edit</button>
-              <button class="btn btn--sm act-color">Color</button>
-              <button class="btn btn--sm act-triggers">Triggers</button>
-            </div>
-          </div>
-        </div>
-      </div>
+    <!-- Mobile swipe view (populated dynamically) -->
+    <div class="anim-swipe" id="anim-swipe">
+      <!-- Slides inserted by loadAnimationsList() -->
     </div>
 
-    <!-- Desktop grid view -->
-    <div class="anim-grid">
-      <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#001689,#000a2e)">Preview</div>
-        <div class="meta"><h3>Rainbow Wave</h3><p>Smooth rainbow cycling</p></div>
-        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
-      </div>
-      <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#0014a0,#001040)">Preview</div>
-        <div class="meta"><h3>Sparkle Burst</h3><p>Random sparkle effect</p></div>
-        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
-      </div>
-      <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#c084fc,#1a1a2e)">Preview</div>
-        <div class="meta"><h3>Cozy Warm</h3><p>Warm white fade</p></div>
-        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
-      </div>
-      <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#001689,#002080)">Preview</div>
-        <div class="meta"><h3>Fire Flicker</h3><p>Candle flame simulation</p></div>
-        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
-      </div>
-      <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#38bdf8,#1e3a5f)">Preview</div>
-        <div class="meta"><h3>Ocean Breeze</h3><p>Gentle blue undulation</p></div>
-        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
-      </div>
-      <div class="card anim-card">
-        <div class="thumb" style="background:linear-gradient(135deg,#f472b6,#7c3aed)">Preview</div>
-        <div class="meta"><h3>Party Strobe</h3><p>High-energy color flash</p></div>
-        <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>
-      </div>
+    <!-- Desktop grid view (populated dynamically) -->
+    <div class="anim-grid" id="anim-grid">
+      <!-- Cards inserted by loadAnimationsList() -->
     </div>
 
     <!-- Detail view (desktop: replaces grid on card click) -->
     <div class="anim-detail" id="anim-detail">
-      <div class="detail-preview" id="detail-preview" style="background:linear-gradient(135deg,#001689,#000a2e)"></div>
+      <div class="detail-preview" id="detail-preview">
+        <video id="detail-video" muted playsinline loop></video>
+      </div>
       <div class="detail-overlay-top">
         <div class="detail-toolbar">
           <button class="btn btn--sm" id="detail-back">&larr; Back</button>
@@ -1466,7 +1398,8 @@ label { font-size: 0.8rem; color: var(--text-dim); }
     </div>
     <div class="editor-layout">
       <div class="editor-preview">
-        LED Preview
+        <video id="ed-video" muted playsinline></video>
+        <span class="ed-placeholder" id="ed-placeholder">LED Preview</span>
         <div class="live-badge">
           <input type="checkbox" class="toggle" id="live-toggle">
           <label for="live-toggle">Live</label>
@@ -1501,96 +1434,7 @@ label { font-size: 0.8rem; color: var(--text-dim); }
         </div>
 
         <div class="clip-list" id="clip-list">
-          <div class="card clip-row selected">
-            <span class="clip-index">1</span>
-            <div class="clip-effect">
-              <select>
-                <option selected>Rainbow Wave</option>
-                <option>Sparkle</option>
-                <option>Solid Color</option>
-                <option>Fire</option>
-                <option>Breathing</option>
-                <option>Ocean Breeze</option>
-              </select>
-            </div>
-            <div class="clip-duration">
-              <input type="number" value="12.0" min="0.1" step="0.1">
-              <span>s</span>
-            </div>
-            <button class="clip-delete">&#x2715;</button>
-          </div>
-          <div class="card clip-row">
-            <span class="clip-index">2</span>
-            <div class="clip-effect">
-              <select>
-                <option>Rainbow Wave</option>
-                <option>Sparkle</option>
-                <option selected>Solid Color</option>
-                <option>Fire</option>
-                <option>Breathing</option>
-                <option>Ocean Breeze</option>
-              </select>
-            </div>
-            <div class="clip-duration">
-              <input type="number" value="8.0" min="0.1" step="0.1">
-              <span>s</span>
-            </div>
-            <button class="clip-delete">&#x2715;</button>
-          </div>
-          <div class="card clip-row">
-            <span class="clip-index">3</span>
-            <div class="clip-effect">
-              <select>
-                <option>Rainbow Wave</option>
-                <option selected>Sparkle</option>
-                <option>Solid Color</option>
-                <option>Fire</option>
-                <option>Breathing</option>
-                <option>Ocean Breeze</option>
-              </select>
-            </div>
-            <div class="clip-duration">
-              <input type="number" value="5.0" min="0.1" step="0.1">
-              <span>s</span>
-            </div>
-            <button class="clip-delete">&#x2715;</button>
-          </div>
-          <div class="card clip-row">
-            <span class="clip-index">4</span>
-            <div class="clip-effect">
-              <select>
-                <option>Rainbow Wave</option>
-                <option>Sparkle</option>
-                <option>Solid Color</option>
-                <option selected>Fire</option>
-                <option>Breathing</option>
-                <option>Ocean Breeze</option>
-              </select>
-            </div>
-            <div class="clip-duration">
-              <input type="number" value="10.0" min="0.1" step="0.1">
-              <span>s</span>
-            </div>
-            <button class="clip-delete">&#x2715;</button>
-          </div>
-          <div class="card clip-row">
-            <span class="clip-index">5</span>
-            <div class="clip-effect">
-              <select>
-                <option>Rainbow Wave</option>
-                <option>Sparkle</option>
-                <option>Solid Color</option>
-                <option>Fire</option>
-                <option>Breathing</option>
-                <option selected>Ocean Breeze</option>
-              </select>
-            </div>
-            <div class="clip-duration">
-              <input type="number" value="15.0" min="0.1" step="0.1">
-              <span>s</span>
-            </div>
-            <button class="clip-delete">&#x2715;</button>
-          </div>
+          <!-- Clips populated dynamically after effects load -->
         </div>
       </div>
     </div>
@@ -2052,30 +1896,64 @@ clipList.addEventListener("click", (e) => {
   row.classList.add("selected");
 });
 
+// Build <option> list from effectsCache
+function buildEffectOptions(selectedName) {
+  const names = Object.keys(effectsCache);
+  if (!names.length) return '<option>No effects loaded</option>';
+  return names.map(n =>
+    `<option${n === selectedName ? " selected" : ""}>${n}</option>`
+  ).join("");
+}
+
+// Create a clip row element
+function createClipRow(effectName, duration, index) {
+  const div = document.createElement("div");
+  div.className = "card clip-row";
+  div.innerHTML = `
+    <span class="clip-index">${index}</span>
+    <div class="clip-effect">
+      <select>${buildEffectOptions(effectName)}</select>
+    </div>
+    <div class="clip-duration">
+      <input type="number" value="${duration}" min="0.1" step="0.1">
+      <span>s</span>
+      <button class="clip-reset" title="Reset to effect default duration">↺</button>
+    </div>
+    <button class="clip-delete">&#x2715;</button>`;
+  return div;
+}
+
+// Refresh all clip dropdowns (call after effects load)
+function refreshClipDropdowns() {
+  clipList.querySelectorAll(".clip-row").forEach(row => {
+    const sel = row.querySelector(".clip-effect select");
+    const cur = sel.value;
+    sel.innerHTML = buildEffectOptions(cur);
+  });
+}
+
+// Populate initial clips after effects are loaded
+function populateInitialClips() {
+  clipList.innerHTML = "";
+  const names = Object.keys(effectsCache);
+  if (!names.length) return;
+  // Add 3 starter clips from available effects
+  const starters = names.slice(0, Math.min(3, names.length));
+  starters.forEach((name, i) => {
+    const meta = effectsCache[name];
+    const dur = 5.0;
+    clipList.appendChild(createClipRow(name, dur, i + 1));
+  });
+  buildScrubSegments();
+}
+
 // Add clip
 document.getElementById("add-clip").addEventListener("click", () => {
   const count = clipList.querySelectorAll(".clip-row").length;
-  const html = `
-    <div class="card clip-row">
-      <span class="clip-index">${count + 1}</span>
-      <div class="clip-effect">
-        <select>
-          <option>Rainbow Wave</option>
-          <option>Sparkle</option>
-          <option selected>Solid Color</option>
-          <option>Fire</option>
-          <option>Breathing</option>
-          <option>Ocean Breeze</option>
-        </select>
-      </div>
-      <div class="clip-duration">
-        <input type="number" value="5.0" min="0.1" step="0.1">
-        <span>s</span>
-      </div>
-      <button class="clip-delete">&#x2715;</button>
-    </div>`;
-  clipList.insertAdjacentHTML("beforeend", html);
-  clipList.lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const firstName = Object.keys(effectsCache)[0] || "Solid Color";
+  const row = createClipRow(firstName, 5.0, count + 1);
+  clipList.appendChild(row);
+  row.scrollIntoView({ behavior: "smooth", block: "nearest" });
   buildScrubSegments();
 });
 
@@ -2173,6 +2051,7 @@ function playLoop(ts) {
   }
   lastPlayTS = ts;
   updateTransport();
+  if (typeof edSyncVideoPosition === "function") edSyncVideoPosition();
   playRAF = requestAnimationFrame(playLoop);
 }
 
@@ -2184,6 +2063,7 @@ transportPlay.addEventListener("click", () => {
     playRAF = requestAnimationFrame(playLoop);
   } else {
     cancelAnimationFrame(playRAF);
+    if (edVideo) edVideo.pause();
   }
 });
 
@@ -2200,6 +2080,7 @@ transportPrev.addEventListener("click", () => {
     acc += durs[i];
   }
   updateTransport();
+  if (typeof edSyncVideoPosition === "function") edSyncVideoPosition();
 });
 
 transportNext.addEventListener("click", () => {
@@ -2212,6 +2093,7 @@ transportNext.addEventListener("click", () => {
   const total = getTotalDuration();
   if (playTime >= total) playTime = 0;
   updateTransport();
+  if (typeof edSyncVideoPosition === "function") edSyncVideoPosition();
 });
 
 // Scrub click/drag
@@ -2221,6 +2103,7 @@ function scrubFromEvent(e) {
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   playTime = pct * getTotalDuration();
   updateTransport();
+  if (typeof edSyncVideoPosition === "function") edSyncVideoPosition();
 }
 scrubBar.addEventListener("pointerdown", (e) => {
   scrubbing = true;
@@ -2240,44 +2123,344 @@ clipList.addEventListener("input", (e) => {
 // Init segments
 buildScrubSegments();
 
-// Animation grid → detail view (desktop)
-const animGrid = document.querySelector(".anim-grid");
+// ================================================================== //
+// Editor video playback — plays effect videos per clip
+// ================================================================== //
+const edVideo = document.getElementById("ed-video");
+const edPlaceholder = document.getElementById("ed-placeholder");
+let edCurrentClipIdx = -1;
+let edCurrentEffectName = "";
+
+// Get clip info (effect name, duration) for a given index
+function getClipInfo(idx) {
+  const rows = clipList.querySelectorAll(".clip-row");
+  if (idx < 0 || idx >= rows.length) return null;
+  const row = rows[idx];
+  const effectName = row.querySelector(".clip-effect select").value;
+  const duration = parseFloat(row.querySelector(".clip-duration input").value) || 1;
+  return { effectName, duration, row };
+}
+
+// Determine which clip index playTime falls in
+function getActiveClipIndex() {
+  const durs = getClipDurations();
+  let acc = 0;
+  for (let i = 0; i < durs.length; i++) {
+    if (playTime >= acc && playTime < acc + durs[i]) return i;
+    acc += durs[i];
+  }
+  return durs.length ? durs.length - 1 : -1;
+}
+
+// Get how far into the current clip we are (seconds)
+function getTimeInClip() {
+  const durs = getClipDurations();
+  let acc = 0;
+  for (let i = 0; i < durs.length; i++) {
+    if (playTime >= acc && playTime < acc + durs[i]) return playTime - acc;
+    acc += durs[i];
+  }
+  return 0;
+}
+
+// Load the correct video for a clip and set playback rate
+function edLoadClipVideo(clipIdx) {
+  const info = getClipInfo(clipIdx);
+  if (!info) return;
+  const meta = effectsCache[info.effectName];
+  if (!meta) {
+    edVideo.removeAttribute("src");
+    edVideo.load();
+    edPlaceholder.style.display = "";
+    edCurrentEffectName = "";
+    edCurrentClipIdx = clipIdx;
+    return;
+  }
+
+  edPlaceholder.style.display = "none";
+  edCurrentClipIdx = clipIdx;
+  edCurrentEffectName = info.effectName;
+
+  const src = "effects/" + info.effectName + "/" + meta.preview;
+  if (edVideo.getAttribute("src") !== src) {
+    edVideo.src = src;
+    edVideo.load();
+  }
+
+  // Set playback rate based on effect fps vs base 30fps
+  const baseFps = 30;
+  const targetFps = meta.defaults.fps || 30;
+  edVideo.playbackRate = targetFps / baseFps;
+}
+
+// Seek video to correct position within the effect, respecting in/out trim
+function edSyncVideoPosition() {
+  const clipIdx = getActiveClipIndex();
+  if (clipIdx < 0) return;
+
+  // If clip changed, load new video
+  const info = getClipInfo(clipIdx);
+  if (!info) return;
+  if (clipIdx !== edCurrentClipIdx || info.effectName !== edCurrentEffectName) {
+    edLoadClipVideo(clipIdx);
+  }
+
+  const meta = effectsCache[info.effectName];
+  if (!meta || !edVideo.duration || isNaN(edVideo.duration)) return;
+
+  const fps = meta.defaults.fps || 30;
+  const inSec = (meta.defaults.in || 0) / fps;
+  const outSec = edVideo.duration - ((meta.defaults.out || 0) / fps);
+  const trimDuration = Math.max(outSec - inSec, 0.1);
+
+  // How far into this clip are we
+  const timeInClip = getTimeInClip();
+  // Loop the video within the trim range
+  const videoPos = inSec + (timeInClip % trimDuration);
+
+  if (Math.abs(edVideo.currentTime - videoPos) > 0.15) {
+    edVideo.currentTime = videoPos;
+  }
+
+  if (isPlaying && edVideo.paused) edVideo.play().catch(() => {});
+  if (!isPlaying && !edVideo.paused) edVideo.pause();
+}
+
+// Reset-duration button handler (delegated)
+clipList.addEventListener("click", (e) => {
+  const resetBtn = e.target.closest(".clip-reset");
+  if (!resetBtn) return;
+  const row = resetBtn.closest(".clip-row");
+  const effectName = row.querySelector(".clip-effect select").value;
+  const meta = effectsCache[effectName];
+  if (!meta) return;
+  // Reset to video's natural duration trimmed by in/out
+  const fps = meta.defaults.fps || 30;
+  // We don't know the video duration without loading it, so use a reasonable default
+  // Use 5.0 as fallback
+  const durInput = row.querySelector(".clip-duration input");
+  durInput.value = "5.0";
+  buildScrubSegments();
+});
+
+// ================================================================== //
+// Animation grid → detail view (dynamic loading)
+// ================================================================== //
+const animGrid = document.getElementById("anim-grid");
+const animSwipe = document.getElementById("anim-swipe");
 const animDetail = document.getElementById("anim-detail");
 const detailTitle = document.getElementById("detail-title");
 const detailDesc = document.getElementById("detail-desc");
 const detailPreview = document.getElementById("detail-preview");
-const animCards = Array.from(document.querySelectorAll(".anim-card"));
+const detailVideo = document.getElementById("detail-video");
+
+const animationsCache = {};
+let animNames = [];
 let currentCardIdx = 0;
 
+// Load animations list
+async function loadAnimationsList() {
+  let anims = [];
+  try {
+    const res = await fetch("/api/animations");
+    if (res.ok) anims = await res.json();
+  } catch (e) { /* not running Flask */ }
+
+  // Fallback: try known names directly
+  if (!anims.length) {
+    const names = ["Rainbow Wave", "Sparkle Burst", "Cozy Warm", "Fire Flicker", "Ocean Breeze", "Party Strobe"];
+    for (const name of names) {
+      try {
+        const r = await fetch("animations/" + name + "/animation.json");
+        if (r.ok) anims.push(await r.json());
+      } catch (e) { /* skip */ }
+    }
+  }
+
+  animGrid.innerHTML = "";
+  animSwipe.innerHTML = "";
+  animNames = [];
+
+  for (const anim of anims) {
+    const name = anim.name;
+    animationsCache[name] = anim;
+    animNames.push(name);
+    const previewSrc = "animations/" + name + "/" + (anim.preview || "preview.jpg");
+    const desc = anim.description || "";
+
+    // Grid card
+    const card = document.createElement("div");
+    card.className = "card anim-card";
+    card.dataset.anim = name;
+    card.innerHTML = `
+      <div class="thumb"><img src="${previewSrc}" alt="${name}" onerror="this.style.display='none';this.parentElement.textContent='Preview'"></div>
+      <div class="meta"><h3>${name}</h3><p>${desc}</p></div>
+      <div class="card-actions"><button class="btn btn--sm act-edit">Edit</button><button class="btn btn--sm act-color">Color</button><button class="btn btn--sm act-triggers">Triggers</button></div>`;
+    animGrid.appendChild(card);
+
+    // Swipe slide
+    const slide = document.createElement("div");
+    slide.className = "anim-slide";
+    slide.dataset.anim = name;
+    slide.innerHTML = `
+      <div class="anim-preview"><img src="${previewSrc}" alt="${name}" onerror="this.style.display='none'"></div>
+      <div class="anim-overlay">
+        <img class="overlay-ball" src="corp/onlyballfromlogo.png" alt="">
+        <div class="overlay-right">
+          <div class="anim-info"><h3>${name}</h3><p>${desc}</p></div>
+          <div class="anim-actions">
+            <button class="btn btn--sm act-edit">Edit</button>
+            <button class="btn btn--sm act-color">Color</button>
+            <button class="btn btn--sm act-triggers">Triggers</button>
+          </div>
+        </div>
+      </div>`;
+    animSwipe.appendChild(slide);
+  }
+
+  // Wire up delegated events after population
+  wireAnimEvents();
+}
+
+// Detail view plays the editor's clip sequence (same effects/in/out/fps)
+let detailPlaying = false;
+let detailTime = 0;
+let detailRAF = null;
+let detailLastTS = 0;
+let detailClipIdx = -1;
+let detailEffectName = "";
+
+function detailGetClips() {
+  // Read clips from the editor clip list
+  const rows = clipList.querySelectorAll(".clip-row");
+  return Array.from(rows).map(r => ({
+    effect: r.querySelector(".clip-effect select").value,
+    duration: parseFloat(r.querySelector(".clip-duration input").value) || 1
+  }));
+}
+
+function detailTotalDuration(clips) {
+  return clips.reduce((a, c) => a + c.duration, 0);
+}
+
+function detailActiveClip(clips) {
+  let acc = 0;
+  for (let i = 0; i < clips.length; i++) {
+    if (detailTime >= acc && detailTime < acc + clips[i].duration) return { idx: i, offset: detailTime - acc };
+    acc += clips[i].duration;
+  }
+  return clips.length ? { idx: clips.length - 1, offset: 0 } : { idx: -1, offset: 0 };
+}
+
+function detailLoadClip(effectName) {
+  const meta = effectsCache[effectName];
+  if (!meta) {
+    detailVideo.removeAttribute("src");
+    detailVideo.load();
+    detailEffectName = "";
+    return;
+  }
+  detailEffectName = effectName;
+  const src = "effects/" + effectName + "/" + meta.preview;
+  if (detailVideo.getAttribute("src") !== src) {
+    detailVideo.src = src;
+    detailVideo.load();
+  }
+  const baseFps = 30;
+  const targetFps = meta.defaults.fps || 30;
+  detailVideo.playbackRate = targetFps / baseFps;
+}
+
+function detailSyncVideo() {
+  const clips = detailGetClips();
+  if (!clips.length) return;
+  const total = detailTotalDuration(clips);
+  if (total <= 0) return;
+
+  // Loop
+  if (detailTime >= total) detailTime = detailTime % total;
+
+  const { idx, offset } = detailActiveClip(clips);
+  if (idx < 0) return;
+  const clip = clips[idx];
+
+  // Load new video if clip changed
+  if (idx !== detailClipIdx || clip.effect !== detailEffectName) {
+    detailClipIdx = idx;
+    detailLoadClip(clip.effect);
+  }
+
+  const meta = effectsCache[clip.effect];
+  if (!meta || !detailVideo.duration || isNaN(detailVideo.duration)) return;
+
+  const fps = meta.defaults.fps || 30;
+  const inSec = (meta.defaults.in || 0) / fps;
+  const outSec = detailVideo.duration - ((meta.defaults.out || 0) / fps);
+  const trimDur = Math.max(outSec - inSec, 0.1);
+  const videoPos = inSec + (offset % trimDur);
+
+  if (Math.abs(detailVideo.currentTime - videoPos) > 0.15) {
+    detailVideo.currentTime = videoPos;
+  }
+  if (detailPlaying && detailVideo.paused) detailVideo.play().catch(() => {});
+}
+
+function detailPlayLoop(ts) {
+  if (!detailPlaying) return;
+  if (detailLastTS) {
+    const dt = (ts - detailLastTS) / 1000;
+    detailTime += dt;
+  }
+  detailLastTS = ts;
+  detailSyncVideo();
+  detailRAF = requestAnimationFrame(detailPlayLoop);
+}
+
 function showDetail(idx) {
+  if (idx < 0 || idx >= animNames.length) return;
   currentCardIdx = idx;
-  const card = animCards[idx];
-  detailTitle.textContent = card.querySelector("h3").textContent;
-  detailDesc.textContent = card.querySelector("p").textContent;
-  detailPreview.style.background = card.querySelector(".thumb").style.background;
+  const name = animNames[idx];
+  const anim = animationsCache[name];
+  detailTitle.textContent = name;
+  detailDesc.textContent = anim?.description || "";
+
   animGrid.classList.add("hidden");
   animDetail.classList.add("open");
+
+  // Start playing the editor's clip sequence
+  detailTime = 0;
+  detailClipIdx = -1;
+  detailEffectName = "";
+  detailPlaying = true;
+  detailLastTS = 0;
+  detailRAF = requestAnimationFrame(detailPlayLoop);
 }
 
 function hideDetail() {
   animDetail.classList.remove("open");
   animGrid.classList.remove("hidden");
+  detailPlaying = false;
+  cancelAnimationFrame(detailRAF);
+  detailVideo.pause();
+  detailVideo.removeAttribute("src");
+  detailVideo.load();
 }
 
-animCards.forEach((card, i) => {
-  card.addEventListener("click", (e) => {
-    // Don't open detail if clicking an action button
-    if (e.target.closest(".act-edit, .act-color, .act-triggers")) return;
-    showDetail(i);
-  });
+// Delegated click on grid cards
+animGrid.addEventListener("click", (e) => {
+  if (e.target.closest(".act-edit, .act-color, .act-triggers")) return;
+  const card = e.target.closest(".anim-card");
+  if (!card) return;
+  const idx = animNames.indexOf(card.dataset.anim);
+  if (idx >= 0) showDetail(idx);
 });
 
 document.getElementById("detail-back").addEventListener("click", hideDetail);
 document.getElementById("detail-prev").addEventListener("click", () => {
-  showDetail((currentCardIdx - 1 + animCards.length) % animCards.length);
+  showDetail((currentCardIdx - 1 + animNames.length) % animNames.length);
 });
 document.getElementById("detail-next").addEventListener("click", () => {
-  showDetail((currentCardIdx + 1) % animCards.length);
+  showDetail((currentCardIdx + 1) % animNames.length);
 });
 
 // Slider value display
@@ -2312,21 +2495,34 @@ function setSelectedEffect(name) {
 // ================================================================== //
 function getAnimName(el) {
   const slide = el.closest(".anim-slide");
-  if (slide) return slide.querySelector("h3")?.textContent || "Animation";
+  if (slide) return slide.dataset.anim || slide.querySelector("h3")?.textContent || "Animation";
   const card = el.closest(".anim-card");
-  if (card) return card.querySelector("h3")?.textContent || "Animation";
+  if (card) return card.dataset.anim || card.querySelector("h3")?.textContent || "Animation";
   return detailTitle.textContent || "Animation";
 }
 
-// ================================================================== //
-// Edit → set selected anim, open Editor room
-// ================================================================== //
-document.querySelectorAll(".act-edit").forEach(btn => {
-  btn.addEventListener("click", (e) => {
+// Wire delegated events for edit/color/triggers buttons
+function wireAnimEvents() {
+  // Use delegation on the room itself for dynamically added buttons
+}
+
+// Delegated edit/triggers handlers on the whole select room
+const roomSelect = document.getElementById("room-select");
+roomSelect.addEventListener("click", (e) => {
+  const editBtn = e.target.closest(".act-edit");
+  if (editBtn) {
     e.stopPropagation();
-    setSelectedAnim(getAnimName(btn));
+    setSelectedAnim(getAnimName(editBtn));
     switchRoom("editor");
-  });
+    return;
+  }
+  const trigBtn = e.target.closest(".act-triggers");
+  if (trigBtn) {
+    e.stopPropagation();
+    setSelectedAnim(getAnimName(trigBtn));
+    showTriggersFor(getAnimName(trigBtn));
+    return;
+  }
 });
 
 // Back buttons
@@ -2374,14 +2570,6 @@ function showTriggersFor(name) {
 
 document.getElementById("trigger-filter-clear").addEventListener("click", () => {
   applyTriggerFilter(null);
-});
-
-document.querySelectorAll(".act-triggers").forEach(btn => {
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setSelectedAnim(getAnimName(btn));
-    showTriggersFor(getAnimName(btn));
-  });
 });
 
 // -- Recurrence toggle fields ----------------------------------------
@@ -2814,7 +3002,11 @@ async function loadEffectsList() {
     fxLocalList.appendChild(row);
   }
 }
-loadEffectsList();
+loadEffectsList().then(() => {
+  populateInitialClips();
+  refreshClipDropdowns();
+});
+loadAnimationsList();
 
 // Back button
 document.getElementById("effects-back-editor").addEventListener("click", () => {

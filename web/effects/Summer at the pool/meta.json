@@ -1,9 +1,9 @@
 {
-  "name": "Ocean Waves",
-  "description": "Gentle wave of cool blue and teal tones",
+  "name": "Summer at the pool",
+  "description": "Where cyan sky meets warm rays on red fabric",
   "author": "Adamlights",
   "version": "1.0.0",
-  "category": "nature",
+  "category": "ambient",
   "defaults": {
     "fps": 20,
     "in": 0,

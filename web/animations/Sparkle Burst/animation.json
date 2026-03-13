@@ -1,0 +1,14 @@
+{
+  "name": "Sparkle Burst",
+  "description": "Random sparkle effect",
+  "author": "Adamlights",
+  "version": "1.0.0",
+  "preview": "preview.jpg",
+  "video": "preview.mp4",
+  "clips": [
+    { "effect": "Sparkle", "duration": 10.0 }
+  ],
+  "endMode": "loop",
+  "created": "2026-03-01T00:00:00Z",
+  "modified": "2026-03-01T00:00:00Z"
+}

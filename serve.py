@@ -35,6 +35,20 @@ def list_effects():
                 effects.append(meta)
     return jsonify(effects)
 
+@app.route("/api/animations")
+def list_animations():
+    """Return list of animations that have an animation.json."""
+    anims_dir = os.path.join(ROOT, "web", "animations")
+    anims = []
+    if os.path.isdir(anims_dir):
+        for name in sorted(os.listdir(anims_dir)):
+            meta_path = os.path.join(anims_dir, name, "animation.json")
+            if os.path.isfile(meta_path):
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                anims.append(meta)
+    return jsonify(anims)
+
 # Serve everything under web/ at /
 @app.route("/<path:path>")
 def static_files(path):

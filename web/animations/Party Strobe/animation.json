@@ -1,0 +1,16 @@
+{
+  "name": "Party Strobe",
+  "description": "High-energy color flash",
+  "author": "Adamlights",
+  "version": "1.0.0",
+  "preview": "preview.jpg",
+  "video": "preview.mp4",
+  "clips": [
+    { "effect": "Sparkle", "duration": 5.0 },
+    { "effect": "Aurora", "duration": 5.0 },
+    { "effect": "Fire", "duration": 5.0 }
+  ],
+  "endMode": "loop",
+  "created": "2026-03-01T00:00:00Z",
+  "modified": "2026-03-01T00:00:00Z"
+}

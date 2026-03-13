@@ -1,0 +1,14 @@
+{
+  "name": "Fire Flicker",
+  "description": "Candle flame simulation",
+  "author": "Adamlights",
+  "version": "1.0.0",
+  "preview": "preview.jpg",
+  "video": "preview.mp4",
+  "clips": [
+    { "effect": "Fire", "duration": 20.0 }
+  ],
+  "endMode": "loop",
+  "created": "2026-03-01T00:00:00Z",
+  "modified": "2026-03-01T00:00:00Z"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Cozy Warm",
+  "description": "Warm white fade",
+  "author": "Adamlights",
+  "version": "1.0.0",
+  "preview": "preview.jpg",
+  "video": "preview.mp4",
+  "clips": [
+    { "effect": "Fire", "duration": 15.0 },
+    { "effect": "Fireflies", "duration": 10.0 }
+  ],
+  "endMode": "loop",
+  "created": "2026-03-01T00:00:00Z",
+  "modified": "2026-03-01T00:00:00Z"
+}
