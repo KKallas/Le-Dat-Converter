@@ -226,86 +226,8 @@ label { font-size: 0.8rem; color: var(--text-dim); }
 /* Room 1: Select Animation                                            */
 /* ------------------------------------------------------------------ */
 
-/* Mobile: scroll-snap full-screen swipe */
-.anim-swipe {
-  display: flex;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  gap: 0;
-  height: 100%;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.anim-swipe::-webkit-scrollbar { display: none; }
-
-.anim-swipe .anim-slide {
-  flex: 0 0 100%;
-  scroll-snap-align: center;
-  position: relative;
-  overflow: hidden;
-}
-
-.anim-preview {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-  color: rgba(255,255,255,0.3);
-  border-radius: 0;
-}
-
-.anim-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 40px 16px 16px;
-  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, transparent 100%);
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  z-index: 1;
-}
-.anim-overlay .overlay-ball {
-  flex-shrink: 0;
-  width: 52px;
-  height: 52px;
-  object-fit: contain;
-  opacity: 0.85;
-}
-.anim-overlay .overlay-right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.anim-info {
-  text-align: left;
-}
-.anim-info h3 { font-size: 1rem; margin-bottom: 4px; color: #fff; }
-.anim-info p { font-size: 0.75rem; color: rgba(255,255,255,0.7); }
-
-.anim-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.swipe-dots {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 0;
-}
-.swipe-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--border);
-}
-.swipe-dots span.active { background: var(--accent); }
+/* Mobile: no longer using swipe — detail view handles everything */
+.anim-swipe { display: none; }
 
 /* Desktop: grid */
 .anim-grid { display: none; }
@@ -348,18 +270,21 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   .anim-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
 }
 
-/* Detail view (desktop: shown on card click; replaces grid) */
+/* Detail view (desktop: shown on card click; mobile: always shown) */
 .anim-detail {
-  display: none;
+  display: block;
   position: absolute;
   inset: 0;
   z-index: 10;
   overflow: hidden;
   background: var(--bg-body);
 }
-.anim-detail.open {
-  display: block;
+@media (min-width: 600px) and (min-height: 500px) {
+  .anim-detail { display: none; }
+  .anim-detail.open { display: block; }
+  .anim-detail #detail-back { display: inline-block; }
 }
+#detail-back { display: none; }
 .anim-detail .detail-preview {
   position: absolute;
   inset: 0;
@@ -381,7 +306,8 @@ label { font-size: 0.8rem; color: var(--text-dim); }
   height: 100%;
   object-fit: cover;
 }
-.anim-slide .anim-preview img {
+.anim-slide .anim-preview img,
+.anim-slide .anim-preview video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -2320,9 +2246,15 @@ async function loadAnimationsList() {
 
   // Wire up delegated events after population
   wireAnimEvents();
+
+  // On mobile (no grid), auto-start detail view with first animation
+  if (animNames.length && animSwipe.offsetParent === null) {
+    showDetail(0);
+  }
 }
 
-// Detail view plays the editor's clip sequence (same effects/in/out/fps)
+// Detail view plays the animation's clip sequence
+
 let detailPlaying = false;
 let detailTime = 0;
 let detailRAF = null;
@@ -3005,8 +2937,8 @@ async function loadEffectsList() {
 loadEffectsList().then(() => {
   populateInitialClips();
   refreshClipDropdowns();
+  loadAnimationsList();
 });
-loadAnimationsList();
 
 // Back button
 document.getElementById("effects-back-editor").addEventListener("click", () => {
